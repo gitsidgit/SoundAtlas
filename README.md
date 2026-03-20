@@ -2,126 +2,226 @@
 
 > An audio anthology platform for querying, analysing, and exploring spoken and musical audio content at scale.
 
-SoundAtlas is an open-source toolkit that turns a folder of audio files — podcasts, interviews, music, recordings — into a richly navigable, searchable, and queryable library. It combines automated speaker diarization, waveform visualisation, and AI-powered analysis into a single interactive gallery view.
+SoundAtlas turns a folder of audio files — podcasts, interviews, music, recordings — into a richly navigable, searchable, and queryable library. It combines automated speaker diarization, waveform visualisation, pre-computed peaks for instant playback, and speaker embedding vectors for similarity search into a single interactive gallery.
 
 ---
 
 ## Vision
 
-Most audio content sits in flat file systems, unsearchable and unanalysed. SoundAtlas aims to change that by treating audio as structured data: who speaks when, what they say, how the audio is composed, and how it relates to other content in your collection.
+Most audio content sits in flat file systems, unsearchable and unanalysed. SoundAtlas treats audio as structured data: who speaks when, what they say, how the audio is composed, and how it relates to other content in your collection.
 
-The immediate focus is two parallel use cases that share the same core pipeline:
+Two parallel use cases share the same core pipeline:
 
-- **Music** — identify singers, visualise vocal segments, catalogue stems and multi-artist collaborations
+- **Music** — identify singers, visualise vocal segments, catalogue stems and multi-artist collaborations, track an artist's history of releases across time
 - **Podcasts** — diarise hosts and guests, extract transcripts, surface quotes and topics across episodes
 
 The longer-term goal is a general-purpose audio intelligence layer that works across any spoken or musical content.
 
 ---
 
-## Current State
+## Project Files
 
-The project currently consists of two components built and iterated together:
+```
+SoundAtlas/
+├── singer_waveform_tabulator.html   # Interactive gallery viewer (single file, no build)
+├── singer_pipeline.py               # Speaker diarization + data pipeline
+├── download_data.sh                 # Test data downloader (FMA, LibriSpeech, AMI, MUSDB)
+└── gallery.json                     # Pipeline output — loaded by the viewer at runtime
+```
+
+Place your WAV audio files alongside `gallery.json`. Filenames must match the `name` field in the JSON exactly.
+
+---
+
+## Current State
 
 ### 1. `singer_waveform_tabulator.html` — Interactive Gallery Viewer
 
-A single-file browser application built on [Tabulator 6](https://tabulator.info) with Bootstrap 3 theming. It provides a data-grid view of an audio collection with:
+A single-file browser application built on [Tabulator 6](https://tabulator.info) with Bootstrap 3 theming. No build step — open directly in a browser.
 
-- **Waveform column** — minimal SVG waveforms rendered inline, one per track, with per-singer colour-coded segments overlaid
-- **Singer/speaker visualisation** — colour bands highlight which speaker is active across the timeline of each track
-- **Singer legend** — click any singer to mute/unmute their segments across all visible waveforms
-- **Multi-column sort** — sort builder panel with add/remove sort levels, synced bidirectionally with shift+click header sorting
-- **Column header filters** — toggleable filter row with text, numeric, and dropdown filters per column
-- **Column visibility** — show/hide any column with state persisted to `localStorage`
-- **Column reorder & resize** — drag headers left/right to reorder; drag right edge to resize
-- **Amplitude zoom** — range slider to exaggerate waveform height for quieter signals
-- **Text filter** — live search across filename, genre, and singer names
-- **Pagination** — configurable page size (10 / 20 / 50 / 100 rows)
-- **Full persistence** — sort order, filters, column widths, column order, and visibility all survive page reload via Tabulator's built-in `localStorage` persistence
+**Data loading**
+- Automatically fetches `gallery.json` on load and populates the table with real pipeline data
+- Falls back to 120 synthetic demo tracks if `gallery.json` is not present, clearly indicated in the subtitle
 
-Currently running on 120 synthetically generated tracks with procedural waveforms and randomised singer segments. Ready to be fed real data from the pipeline below.
+**Table features**
+- Inline SVG waveforms with per-speaker colour-coded segment bands
+- Click any waveform cell to open the WaveSurfer audio player modal
+- Speaker/singer legend — click to mute/unmute any speaker across all visible waveforms
+- Multi-column sort builder — add/remove sort levels with a UI panel, synced bidirectionally with shift+click header sorting
+- Toggleable column header filters — text input, numeric, and dropdown (Channels, Sample rate)
+- Column visibility toggle — show/hide any column, state persisted to `localStorage`
+- Column reorder (drag header) and resize (drag right edge)
+- Amplitude zoom slider
+- Live text search across filename, genre, and speaker names
+- Pagination with configurable page size (10 / 20 / 50 / 100)
+- Full persistence — sort, filters, column widths, order, and visibility all survive page reload
+
+**WaveSurfer player modal**
+- Opens on waveform cell click
+- Renders waveform **instantly** from pre-computed peaks stored in `gallery.json` — no audio download needed for the visual
+- Speaker segment regions overlaid on the waveform in matching colours
+- Click-to-seek progress bar, play/pause toggle, elapsed/total time display
+- Streams audio on demand — file must be in the same folder as `gallery.json`
+- Close via ✕ button, backdrop click, or Escape key
 
 ### 2. `singer_pipeline.py` — Speaker Diarization Pipeline
 
-A Python script that processes a folder of WAV files and produces a `gallery.json` file that the viewer can load directly. Built on [pyannote.audio](https://github.com/pyannote/pyannote-audio).
+Processes a folder of WAV files and writes `gallery.json`. Uses [resemblyzer](https://github.com/resemble-ai/Resemblyzer) for speaker diarization — fully local, zero tokens, zero accounts required.
 
-**What it does:**
+**Outputs per track (all stored in `gallery.json`)**
 
-- Reads WAV files (mono or stereo, any sample rate)
-- Runs `pyannote/speaker-diarization-community-1` for speaker detection
-- Merges short same-speaker gaps (< 0.5s) to reduce fragmentation
-- Downsamples waveform data to 200 points per track for lightweight SVG rendering
-- Outputs structured JSON with waveform data, speaker segments, and audio metadata
+| Field | Description |
+|---|---|
+| `waveData` | 200-point normalised float array for the inline SVG viewer |
+| `peaks` | WaveSurfer.js compatible pre-decoded peaks `{version, data, ...}` |
+| `segs` | Speaker segments with `singer`, `start`, `end`, `confidence` |
+| `speakerVectors` | Per-speaker 256-d embedding for cosine similarity search |
+| `svg` | Pre-rendered SVG string (optional, `--svg` flag) |
 
-**Basic usage:**
+**Install**
 
 ```bash
-pip install pyannote.audio torch torchaudio numpy
-
-python singer_pipeline.py \
-  --audio_dir ./my_songs \
-  --hf_token hf_YOURTOKEN \
-  --min_speakers 2 \
-  --max_speakers 4 \
-  --output gallery.json
+pip install resemblyzer scikit-learn numpy scipy
+pip install webrtcvad-wheels   # fixes webrtcvad on Python 3.12+
 ```
 
-A HuggingFace token is required. Accept the model licence at [hf.co/pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) before first use.
+resemblyzer downloads its ~17MB GE2E model automatically on first run from a public URL. No account needed, ever.
+
+**Usage**
+
+```bash
+# Basic
+python3 singer_pipeline.py --audio_dir ./audio
+
+# Fix speaker count for better accuracy when you know it
+python3 singer_pipeline.py --audio_dir ./audio --num_speakers 2
+
+# Constrain speaker range
+python3 singer_pipeline.py --audio_dir ./audio --min_speakers 2 --max_speakers 5
+
+# Pre-render SVGs server-side (faster gallery load)
+python3 singer_pipeline.py --audio_dir ./audio --svg
+
+# All options
+python3 singer_pipeline.py \
+    --audio_dir    ./audio \
+    --output       gallery.json \
+    --num_speakers 2 \
+    --min_speakers 1 \
+    --max_speakers 5 \
+    --svg \
+    --peaks_per_sec 20 \
+    --wavedata_pts  200
+```
+
+**Speaker vector search** (client-side example)
+
+```javascript
+function cosineSim(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+// Find all tracks containing a speaker similar to Singer A in track 0
+const query = tracks[0].speakerVectors['Singer A'];
+const matches = tracks.filter(t =>
+  Object.values(t.speakerVectors).some(v => cosineSim(query, v) > 0.75)
+);
+```
+
+### 3. `download_data.sh` — Test Data Downloader
+
+```bash
+chmod +x download_data.sh
+
+./download_data.sh quick     # ~500MB  — LibriSpeech mini, ideal for first pipeline test
+./download_data.sh podcast   # ~1GB    — LibriSpeech dev + AMI meetings
+./download_data.sh music     # ~8GB    — FMA Small + FMA metadata
+./download_data.sh all       # ~10GB   — everything above
+```
+
+Includes post-download conversion of FLAC → WAV (LibriSpeech) and MP3 → WAV (FMA) via ffmpeg.
+
+---
+
+## Getting Started
+
+**1. Clone and open the viewer (no pipeline needed — uses synthetic data)**
+
+```bash
+open singer_waveform_tabulator.html   # macOS
+# or just double-click the file in Windows/Linux
+```
+
+**2. Download test audio**
+
+```bash
+chmod +x download_data.sh
+./download_data.sh quick
+```
+
+**3. Install pipeline dependencies**
+
+```bash
+pip install resemblyzer scikit-learn numpy scipy webrtcvad-wheels
+```
+
+**4. Run the pipeline**
+
+```bash
+python3 singer_pipeline.py \
+  --audio_dir data/librispeech_wav \
+  --output gallery.json \
+  --min_speakers 1 \
+  --max_speakers 2 \
+  --svg
+```
+
+**5. Open the viewer with real data**
+
+Place `gallery.json` (and optionally your WAV files) in the same folder as `singer_waveform_tabulator.html`, then open it in a browser. The viewer detects the JSON automatically.
+
+> **Note:** Due to browser security restrictions, `fetch('gallery.json')` requires the page to be served over HTTP rather than opened as a local `file://` URL. Use any simple local server:
+> ```bash
+> python3 -m http.server 8080
+> # then open http://localhost:8080/singer_waveform_tabulator.html
+> ```
 
 ---
 
 ## Recommended Audio Sources
 
-| Source | Content | Licence | Notes |
+| Source | Content | Licence | Size |
 |---|---|---|---|
-| [MUSDB18-HQ](https://sigsep.github.io/datasets/musdb.html) | 150 full tracks, isolated stems | Academic | Mix vocal stems to create multi-singer files |
-| [FMA](https://github.com/mdeff/fma) | 106k tracks across 8 genres | CC | `fma_small` is 7GB, good for bulk testing |
-| [ccMixter](https://ccmixter.org) | Vocal collabs and duets | CC | Search "duet" for known multi-singer content |
-| Your own recordings | Any WAV | — | Works directly |
-
----
-
-## Planned Features
-
-### Near-term
-
-- [ ] **Audio playback** — click a row to play the track; playhead syncs with the waveform visualisation
-- [ ] **Load from `gallery.json`** — replace synthetic data with a `fetch()` call to load real pipeline output
-- [ ] **Speaker name editor** — rename `Singer A / B / C` labels to real artist or guest names inline
-- [ ] **Transcript column** — display Whisper-generated transcript snippets per track
-
-### Medium-term
-
-- [ ] **Full-text transcript search** — index transcripts with a lightweight client-side search (Lunr or Flexsearch) so you can search spoken content across the whole collection
-- [ ] **Segment-level playback** — click a coloured singer segment to play just that portion
-- [ ] **Episode/album grouping** — Tabulator row grouping by series, album, or date
-- [ ] **Whisper integration** — add automatic transcription to the pipeline alongside diarization
-
-### Longer-term
-
-- [ ] **AI-powered querying** — natural language questions answered across the whole collection ("which episodes mention climate change?", "which songs have Adele singing in the bridge?")
-- [ ] **Export & reporting** — export filtered views to CSV, generate per-track or per-speaker summary reports
-- [ ] **Web server mode** — lightweight Flask/FastAPI backend to serve the gallery from a local or self-hosted server with real-time pipeline triggering
-- [ ] **Plugin architecture** — drop-in analysers (BPM detection, sentiment, topic modelling) that add columns to the gallery
+| [LibriSpeech](https://www.openslr.org/12) | Multi-speaker read speech | CC BY 4.0 | 337MB (dev-clean) |
+| [AMI Corpus](https://groups.inf.ed.ac.uk/ami/corpus/) | Real multi-speaker meetings | CC BY 4.0 | ~100MB per session |
+| [FMA Small](https://github.com/mdeff/fma) | 8000 × 30s music clips, 8 genres | CC | 7.2GB |
+| [MUSDB18-HQ](https://sigsep.github.io/datasets/musdb.html) | 150 tracks with isolated stems | Academic | 30GB |
+| [ccMixter](https://ccmixter.org) | Vocal collabs and duets | CC | Varies |
 
 ---
 
 ## Architecture
 
 ```
-audio files (WAV)
-      │
-      ▼
+WAV files
+    │
+    ▼
 singer_pipeline.py
-  ├── pyannote diarization  →  speaker segments
-  ├── waveform downsampling →  200-pt float array
+  ├── resemblyzer diarization  →  speaker segments + 256-d vectors
+  ├── waveform downsampling    →  200-pt float array (SVG viewer)
+  ├── peaks computation        →  WaveSurfer pre-decoded peaks
   └── gallery.json
               │
               ▼
 singer_waveform_tabulator.html
-  ├── Tabulator 6 (grid, sort, filter, pagination)
-  ├── Bootstrap 3 (theming)
-  └── inline SVG waveforms (zero dependencies)
+  ├── fetch('gallery.json')        auto-load or synthetic fallback
+  ├── Tabulator 6                  grid, sort, filter, pagination, persistence
+  ├── WaveSurfer 7                 audio playback modal with speaker regions
+  ├── Bootstrap 3                  theming
+  └── inline SVG waveforms         zero-dependency, client or server rendered
 ```
 
 ---
@@ -132,54 +232,44 @@ singer_waveform_tabulator.html
 |---|---|
 | Gallery viewer | HTML / CSS / vanilla JS |
 | Data grid | [Tabulator 6.3](https://tabulator.info) |
+| Audio player | [WaveSurfer.js 7](https://wavesurfer.xyz) |
 | Styling | Bootstrap 3.4 |
-| Diarization | [pyannote.audio](https://github.com/pyannote/pyannote-audio) |
+| Diarization | [resemblyzer](https://github.com/resemble-ai/Resemblyzer) |
 | Transcription (planned) | [OpenAI Whisper](https://github.com/openai/whisper) |
 | AI querying (planned) | Anthropic Claude API |
 
 ---
 
-## Getting Started
+## Planned Features
 
-**1. Clone and open the viewer with synthetic data:**
+### Near-term
+- [ ] **Speaker name editor** — rename `Singer A / B / C` labels to real names inline, persisted to `localStorage`
+- [ ] **Segment-level playback** — click a coloured speaker segment to play just that portion
+- [ ] **Transcript column** — display Whisper-generated transcript snippets per track
+- [ ] **Artist timeline** — concatenate speaker vectors by date to visualise an artist's release history
 
-```bash
-# No build step needed — open directly in a browser
-open singer_waveform_tabulator.html
-```
+### Medium-term
+- [ ] **Full-text transcript search** — client-side index (Lunr or Flexsearch) across all transcripts
+- [ ] **Whisper integration** — automatic transcription added to the pipeline alongside diarization
+- [ ] **Episode/album grouping** — Tabulator row grouping by series, album, or date
+- [ ] **Speaker similarity search UI** — click a speaker pill to find matching speakers across the collection
 
-**2. Run the pipeline on real audio:**
-
-```bash
-pip install pyannote.audio torch torchaudio numpy
-python singer_pipeline.py --audio_dir ./audio --hf_token hf_YOURTOKEN
-```
-
-**3. Wire the viewer to real data:**
-
-In `singer_waveform_tabulator.html`, replace the synthetic track generation block (the `for` loop that builds `tracks[]`) with:
-
-```javascript
-fetch('gallery.json')
-  .then(function(r){ return r.json(); })
-  .then(function(data){
-    tracks = data;
-    tracks.forEach(function(t){
-      t.waveData = new Float32Array(t.waveData);
-    });
-    initTable(); // move the Tabulator init into this function
-  });
-```
+### Longer-term
+- [ ] **AI-powered querying** — natural language questions across the whole collection ("which episodes mention climate change?", "which songs have Adele in the bridge?")
+- [ ] **Export & reporting** — filtered views to CSV, per-track or per-speaker summary reports
+- [ ] **Web server mode** — lightweight Flask/FastAPI backend with real-time pipeline triggering
+- [ ] **Plugin architecture** — drop-in analysers (BPM, sentiment, topic modelling) that add columns
 
 ---
 
 ## Contributing
 
-This project is at an early stage. Issues, ideas, and pull requests are welcome. The most useful contributions right now are:
+Issues, ideas, and pull requests are welcome. The most useful contributions right now are:
 
-- Testing the pipeline against different audio formats and speaker counts
+- Testing the pipeline against varied audio formats, languages, and speaker counts
 - Integrating Whisper transcription into `singer_pipeline.py`
-- Building the audio playback layer in the viewer
+- Speaker name editor UI in the viewer
+- Segment-level click-to-play
 
 ---
 

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Singer Waveform Gallery</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.4.1/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabulator-tables/6.3.1/css/tabulator_bootstrap3.min.css">
+<style>
+body{background:#f0f2f5;font-family:"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;padding:12px}
+.panel{border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.12);margin-bottom:0}
+.panel-heading{border-radius:8px 8px 0 0;background:linear-gradient(135deg,#5b7cfa,#9b59b6)!important;border:none;padding:12px 16px}
+.panel-title{color:#fff;font-weight:300;font-size:17px;margin:0}
+.panel-subtitle{color:rgba(255,255,255,.75);font-size:11px;margin:3px 0 0}
+.legend{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;background:#fafafa;border-bottom:1px solid #e5e5e5;align-items:center}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#444;cursor:pointer;padding:2px 8px;border-radius:10px;border:1px solid transparent;transition:all .12s;user-select:none}
+.leg-item:hover{border-color:#bbb;background:#fff}
+.leg-item.muted{opacity:.28;text-decoration:line-through}
+.leg-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+
+/* toolbar */
+.toolbar{padding:8px 12px;background:#fff;border-bottom:1px solid #e8e8e8;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.toolbar label{font-size:11px;color:#777;margin:0;white-space:nowrap}
+.hint{background:#fffbe6;border:1px solid #ffe58f;border-radius:4px;padding:3px 8px;font-size:11px;color:#7d6608}
+
+/* shared collapsible panel */
+.ctrl-panel{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 12px;border-bottom:1px solid #e0e5ff;overflow:hidden;max-height:120px;transition:max-height .25s ease,padding .25s ease,border-width .25s ease}
+.ctrl-panel.collapsed{max-height:0;padding-top:0;padding-bottom:0;border-bottom-width:0}
+.ctrl-panel.sort-panel{background:#f7f8ff;border-color:#e0e5ff}
+.ctrl-panel.col-panel {background:#f7fff8;border-color:#d0eedd}
+
+/* shared toolbar toggle buttons */
+.tb-btn{font-size:11px;padding:3px 10px;border-radius:4px;background:#fff;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.tb-btn .arr{font-size:9px;transition:transform .2s;display:inline-block}
+.tb-btn.active .arr{transform:rotate(180deg)}
+.tb-btn.sort-btn{border:1px solid #5b7cfa;color:#5b7cfa}
+.tb-btn.sort-btn:hover{background:#eef1ff}
+.tb-btn.sort-btn.active{background:#5b7cfa;color:#fff}
+.tb-btn.col-btn{border:1px solid #27ae82;color:#27ae82}
+.tb-btn.col-btn:hover{background:#edfaf5}
+.tb-btn.col-btn.active{background:#27ae82;color:#fff}
+.tb-btn.filter-btn{border:1px solid #e67e22;color:#e67e22}
+.tb-btn.filter-btn:hover{background:#fef5ec}
+.tb-btn.filter-btn.active{background:#e67e22;color:#fff}
+
+/* sort builder */
+.sort-row{display:flex;align-items:center;gap:4px;background:#fff;border:1px solid #dde;border-radius:5px;padding:3px 6px}
+.sort-rank{font-size:10px;font-weight:700;color:#5b7cfa;min-width:12px}
+.sort-row select{font-size:11px;border:none;outline:none;background:transparent;color:#333;cursor:pointer;padding:0 2px;height:22px}
+.dir-btn{font-size:11px;border:none;background:transparent;cursor:pointer;color:#5b7cfa;font-weight:700;padding:0 3px;line-height:1}
+.dir-btn:hover{color:#3a5cd0}
+.rm-btn{font-size:13px;line-height:1;border:none;background:transparent;cursor:pointer;color:#bbb;padding:0 2px}
+.rm-btn:hover{color:#e74c3c}
+.sort-add-btn{font-size:13px;font-weight:700;width:22px;height:22px;border-radius:50%;border:1px solid #5b7cfa;background:#fff;color:#5b7cfa;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sort-add-btn:hover{background:#5b7cfa;color:#fff}
+.sort-apply-btn{font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #5b7cfa;background:#5b7cfa;color:#fff;cursor:pointer;white-space:nowrap}
+.sort-apply-btn:hover{background:#3a5cd0;border-color:#3a5cd0}
+.sort-clear-btn{font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid #ccc;background:#fff;color:#777;cursor:pointer;white-space:nowrap}
+.sort-clear-btn:hover{background:#f5f5f5}
+.sort-label{font-size:11px;color:#777;white-space:nowrap}
+
+/* column visibility checkboxes */
+.col-check{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:5px;border:1px solid #cce8d8;background:#fff;font-size:11px;color:#333;cursor:pointer;user-select:none;transition:all .12s}
+.col-check:hover{background:#edfaf1;border-color:#27ae82}
+.col-check.hidden-col{opacity:.45;background:#f5f5f5;border-color:#ddd}
+.col-check input[type=checkbox]{cursor:pointer;margin:0;width:13px;height:13px;accent-color:#27ae82}
+.col-panel-label{font-size:11px;color:#777;white-space:nowrap;margin-right:4px}
+
+/* Tabulator overrides */
+#tbl .tabulator{border:none;font-size:12px}
+#tbl .tabulator-header{background:#f5f5f5;border-bottom:2px solid #ddd}
+#tbl .tabulator-col{background:#f5f5f5;border-right:1px solid #e0e0e0}
+#tbl .tabulator-col-title{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#555;font-weight:600}
+#tbl .tabulator-row{border-bottom:1px solid #f0f0f0}
+#tbl .tabulator-row:hover{background:#f0f4ff!important}
+#tbl .tabulator-row.tabulator-row-even{background:#fff}
+#tbl .tabulator-row.tabulator-row-odd{background:#fafafa}
+#tbl .tabulator-cell{padding:5px 10px;vertical-align:middle;overflow:hidden}
+#tbl .tabulator-col-resize-handle{width:6px;background:transparent;border-right:2px solid transparent;transition:border-color .15s}
+#tbl .tabulator-col-resize-handle:hover{border-right-color:#5b7cfa}
+#tbl .tabulator-footer{background:#fafafa;border-top:1px solid #e8e8e8;padding:6px 10px}
+#tbl .tabulator-page{border-radius:4px;font-size:12px}
+#tbl .tabulator-page.active{background:#5b7cfa;color:#fff;border-color:#5b7cfa}
+
+/* cell content */
+.song-title{font-weight:600;color:#222;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.song-sub{font-size:10px;color:#aaa;margin-top:1px}
+.badge-ch{background:#e8f4fd;color:#1a78c2;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600}
+.badge-sr{background:#edfaf1;color:#1a9e5a;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600}
+.badge-dur{background:#f3f0ff;color:#6b44c9;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600}
+.singer-pill{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;margin:1px;white-space:nowrap}
+svg.wv{display:block;width:100%;height:30px}
+
+.footer-bar{padding:6px 12px;background:#fafafa;border-top:1px solid #eee;font-size:10px;color:#bbb;text-align:center;border-radius:0 0 8px 8px}
+</style>
+</head>
+<body>
+<div class="panel panel-default">
+
+  <div class="panel-heading">
+    <div class="panel-title">Multi-singer waveform gallery</div>
+    <div class="panel-subtitle">120 tracks &bull; drag headers to reorder &bull; drag header edge to resize &bull; click to sort</div>
+  </div>
+
+  <div class="legend" id="legend">
+    <span style="font-size:11px;color:#999;margin-right:4px">Singers:</span>
+  </div>
+
+  <div class="toolbar">
+    <label>Amp zoom:</label>
+    <input type="range" min="1" max="4" step="0.1" value="1" id="zoom" style="width:90px">
+    <span id="zoom-val" style="font-size:11px;min-width:28px;color:#555">1x</span>
+    <label style="margin-left:6px">Filter:</label>
+    <input type="text" id="srch" class="form-control input-sm" placeholder="name, genre or singer" style="width:165px;display:inline-block">
+    <span id="row-count" style="margin-left:auto;font-size:11px;color:#aaa"></span>
+    <button class="tb-btn sort-btn"   id="sort-toggle-btn">&#9776; Sort <span class="arr">&#9660;</span></button>
+    <button class="tb-btn col-btn"    id="col-toggle-btn">&#9638; Columns <span class="arr">&#9660;</span></button>
+    <button class="tb-btn filter-btn" id="hf-toggle-btn">&#9906; Filters <span class="arr">&#9660;</span></button>
+    <div class="hint">&#9432; Shift+click headers for multi-sort</div>
+  </div>
+
+  <!-- Sort builder panel -->
+  <div class="ctrl-panel sort-panel collapsed" id="sort-builder">
+    <span class="sort-label">Sort by:</span>
+    <div id="sort-rows" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"></div>
+    <button class="sort-add-btn" id="sort-add-btn" title="Add sort level">+</button>
+    <button class="sort-apply-btn" id="sort-apply-btn">Apply</button>
+    <button class="sort-clear-btn" id="sort-clear-btn">Clear</button>
+  </div>
+
+  <!-- Column visibility panel -->
+  <div class="ctrl-panel col-panel collapsed" id="col-panel">
+    <span class="col-panel-label">Show / hide:</span>
+    <div id="col-checks" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+  </div>
+
+  <div id="tbl"></div>
+
+  <div class="footer-bar">
+    Simulated voice-activity detection &mdash; replace with pyannote / speechbrain output in production
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tabulator-tables/6.3.1/js/tabulator.min.js"></script>
+<script>
+var SINGERS = ["Maria Carey","Whitney Houston","Adele","Billie Eilish","Beyonce","Lorde","Rihanna","Taylor Swift"];
+var COLORS  = ["#5b7cfa","#e74c7d","#27ae82","#f39c12","#9b59b6","#e74c3c","#16a085","#d35400"];
+var TYPES   = ["ballad","upbeat","rnb","folk","pop","rock"];
+var SR_OPTS = [22050,44100,48000];
+var PTS     = 200;
+var mutedSingers = {};
+var currentZoom  = 1;
+var table        = null;
+
+function lcg(seed){ return function(){ seed=(seed*1664525+1013904223)>>>0; return seed/4294967296; }; }
+function colorOf(s){ return COLORS[SINGERS.indexOf(s)%COLORS.length]; }
+function fmtDur(s){ return Math.floor(s/60)+":"+("0"+(s%60|0)).slice(-2); }
+
+function genWave(type,pts,seed){
+  var rng=lcg(seed),r=function(){return rng()*2-1;},a=new Float32Array(pts);
+  for(var i=0;i<pts;i++){
+    var t=i/pts,v=0;
+    if(type==="ballad")      v=Math.sin(t*Math.PI*5)*.5+Math.sin(t*Math.PI*13)*.18*(0.4+0.6*Math.sin(t*Math.PI*2.2));
+    else if(type==="upbeat"){var b=t*16%1;v=b<.12?Math.exp(-b*28)*.9:r()*.09;}
+    else if(type==="rnb")    v=Math.sin(t*Math.PI*7)*.42+Math.sin(t*Math.PI*15)*.18+r()*.06;
+    else if(type==="folk")   v=Math.sin(t*Math.PI*4)*.48*(0.5+0.5*Math.abs(Math.sin(t*Math.PI*3)))+r()*.05;
+    else if(type==="pop")    v=Math.sin(t*Math.PI*9)*.35+Math.sin(t*Math.PI*21)*.2+r()*.07;
+    else                     v=Math.sin(t*Math.PI*6)*.4+r()*.15;
+    a[i]=Math.max(-1,Math.min(1,v));
+  }
+  return a;
+}
+
+function makeSegments(dur,nS,rng){
+  var idxs=[],segs=[],pos=0;
+  while(idxs.length<nS){var ix=Math.floor(rng()*SINGERS.length);if(idxs.indexOf(ix)===-1)idxs.push(ix);}
+  for(var i=0;i<nS;i++){
+    var len=(dur/nS)*(0.7+rng()*.6),end=Math.min(dur,pos+len);
+    segs.push({singer:SINGERS[idxs[i]],start:pos,end:end,confidence:0.7+rng()*.28});
+    pos=end;if(pos>=dur)break;
+  }
+  return segs;
+}
+
+var tracks=[];
+for(var i=0;i<120;i++){
+  var rng=lcg(i*7919+13);
+  var type=TYPES[Math.floor(rng()*TYPES.length)];
+  var dur=90+Math.floor(rng()*210);
+  var sr=SR_OPTS[Math.floor(rng()*SR_OPTS.length)];
+  var ch=rng()>.4?2:1;
+  var nS=2+Math.floor(rng()*4);
+  var segs=makeSegments(dur,nS,rng);
+  var data=genWave(type,PTS,i*31+7);
+  tracks.push({id:i+1,idx:i+1,name:type+"_track_"+("000"+(i+1)).slice(-3)+".wav",
+    genre:type,durRaw:dur,sr:sr,ch:ch,segs:segs,waveData:data,singers:"_"});
+}
+
+function buildSVG(track){
+  var W=400,H=30,mid=H/2,amp=H*0.44*currentZoom,xs=(W-1)/(PTS-1),gp="";
+  for(var i=0;i<PTS;i++) gp+=(i*xs).toFixed(1)+","+Math.max(0,Math.min(H,mid-track.waveData[i]*amp)).toFixed(1)+" ";
+  var fills="",lines="";
+  for(var si=0;si<track.segs.length;si++){
+    var seg=track.segs[si];
+    if(mutedSingers[seg.singer])continue;
+    var col=colorOf(seg.singer);
+    var i0=Math.round(seg.start/track.durRaw*(PTS-1));
+    var i1=Math.min(PTS-1,Math.round(seg.end/track.durRaw*(PTS-1)));
+    var top="",bot="";
+    for(var pi=i0;pi<=i1;pi++){
+      var px=(pi*xs).toFixed(1);
+      var py=Math.max(0,Math.min(H,mid-track.waveData[pi]*amp)).toFixed(1);
+      var pyb=Math.max(0,Math.min(H,mid+track.waveData[pi]*amp)).toFixed(1);
+      top+=px+","+py+" ";bot=px+","+pyb+" "+bot;
+    }
+    var x0=(i0*xs).toFixed(1),x1=(i1*xs).toFixed(1);
+    fills+='<polygon points="'+x0+","+mid+" "+top+x1+","+mid+" "+bot+'" fill="'+col+'" fill-opacity="0.28"/>';
+    lines+='<polyline points="'+x0+","+mid+" "+top+x1+","+mid+'" fill="none" stroke="'+col+'" stroke-width="1.5"/>';
+  }
+  return '<svg class="wv" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
+        +'<rect width="'+W+'" height="'+H+'" fill="#f7f8fa"/>'
+        +'<line x1="0" y1="'+mid+'" x2="'+W+'" y2="'+mid+'" stroke="#ddd" stroke-width="0.8"/>'
+        +'<polyline points="'+gp+'" fill="none" stroke="#ccc" stroke-width="0.9"/>'
+        +fills+lines+'</svg>';
+}
+
+function fmtName(cell){
+  var r=cell.getRow().getData();
+  return '<div class="song-title" title="'+r.name+'">'+r.name+'</div><div class="song-sub">'+r.genre+'</div>';
+}
+function fmtDuration(cell) { return '<span class="badge-dur">'+fmtDur(cell.getValue())+'</span>'; }
+function fmtChannels(cell) { return '<span class="badge-ch">'+(cell.getValue()===1?'Mono':'Stereo')+'</span>'; }
+function fmtSampleRate(cell){ return '<span class="badge-sr">'+(cell.getValue()/1000).toFixed(1)+'kHz</span>'; }
+function fmtSingers(cell){
+  var r=cell.getRow().getData();
+  return r.segs.map(function(s){
+    var c=colorOf(s.singer);
+    return '<span class="singer-pill" style="background:'+c+'22;color:'+c+';border:1px solid '+c+'55">'+s.singer+'</span>';
+  }).join("");
+}
+function fmtWaveform(cell){ return buildSVG(cell.getRow().getData()); }
+
+/* Legend */
+var allSingers=[];
+tracks.forEach(function(t){ t.segs.forEach(function(s){ if(allSingers.indexOf(s.singer)===-1)allSingers.push(s.singer); }); });
+var leg=document.getElementById('legend');
+allSingers.forEach(function(s){
+  var d=document.createElement('div');
+  d.className='leg-item';
+  d.innerHTML='<span class="leg-dot" style="background:'+colorOf(s)+'"></span>'+s;
+  d.onclick=function(){
+    if(mutedSingers[s])delete mutedSingers[s];else mutedSingers[s]=true;
+    d.classList.toggle('muted');
+    table.getRows().forEach(function(row){
+      var cell=row.getCell('waveform');
+      if(cell)cell.getElement().innerHTML=buildSVG(row.getData());
+    });
+  };
+  leg.appendChild(d);
+});
+
+/* ── Tabulator init ── */
+table = new Tabulator("#tbl",{
+  data:           tracks,
+  layout:         "fitData",
+  pagination:     true,
+  paginationSize: 20,
+  paginationSizeSelector:[10,20,50,100],
+  movableColumns: true,
+  resizableColumns: true,
+  headerSortTristate: true,
+  persistenceID:  "singer-waveform-gallery-v1",
+  persistence:    {sort:true,filter:true,headerFilter:true,group:true,page:true,columns:true},
+  columnDefaults: {resizable:true,headerSort:false},
+  rowFormatter:   function(){},
+  columns:[
+    {title:"#",           field:"idx",      width:42,  headerSort:true, sorter:"number", headerFilter:"input"},
+    {title:"File",        field:"name",     width:170, headerSort:true, sorter:"string", formatter:fmtName,       headerFilter:"input"},
+    {title:"Duration",    field:"durRaw",   width:80,  headerSort:true, sorter:"number", formatter:fmtDuration,   headerFilter:"number"},
+    {title:"Channels",    field:"ch",       width:80,  headerSort:true, sorter:"number", formatter:fmtChannels,   headerFilter:"select", headerFilterParams:{values:{1:"Mono",2:"Stereo"}}},
+    {title:"Sample rate", field:"sr",       width:95,  headerSort:true, sorter:"number", formatter:fmtSampleRate, headerFilter:"select", headerFilterParams:{values:{22050:"22kHz",44100:"44.1kHz",48000:"48kHz"}}},
+    {title:"Singers",     field:"singers",  width:190, headerSort:false,                 formatter:fmtSingers},
+    {title:"Waveform",    field:"waveform", width:260, headerSort:false,                 formatter:fmtWaveform}
+  ]
+});
+
+/* ── Sort builder ── */
+var SORTABLE_COLS=[
+  {field:"idx",    label:"#"},
+  {field:"name",   label:"File"},
+  {field:"durRaw", label:"Duration"},
+  {field:"ch",     label:"Channels"},
+  {field:"sr",     label:"Sample rate"}
+];
+var suppressSortSync=false;
+
+function renderSortRanks(){
+  var rows=document.getElementById('sort-rows').querySelectorAll('.sort-row');
+  var n=1; rows.forEach(function(r){r.querySelector('.sort-rank').textContent=n++;});
+}
+
+function addSortRow(field,dir){
+  field=field||SORTABLE_COLS[0].field; dir=dir||'asc';
+  var container=document.getElementById('sort-rows');
+  var row=document.createElement('div'); row.className='sort-row';
+
+  var rankEl=document.createElement('span'); rankEl.className='sort-rank';
+  rankEl.textContent=container.querySelectorAll('.sort-row').length+1;
+
+  var sel=document.createElement('select');
+  SORTABLE_COLS.forEach(function(c){
+    var opt=document.createElement('option'); opt.value=c.field; opt.textContent=c.label;
+    if(c.field===field)opt.selected=true; sel.appendChild(opt);
+  });
+
+  var dirBtn=document.createElement('button'); dirBtn.className='dir-btn'; dirBtn.dataset.dir=dir;
+  dirBtn.innerHTML=dir==='asc'?'&#9650; Asc':'&#9660; Desc';
+  dirBtn.onclick=function(){
+    dirBtn.dataset.dir=dirBtn.dataset.dir==='asc'?'desc':'asc';
+    dirBtn.innerHTML=dirBtn.dataset.dir==='asc'?'&#9650; Asc':'&#9660; Desc';
+  };
+
+  var rmBtn=document.createElement('button'); rmBtn.className='rm-btn'; rmBtn.innerHTML='&#10005;'; rmBtn.title='Remove';
+  rmBtn.onclick=function(){ row.parentNode.removeChild(row); renderSortRanks(); applySortBuilder(); };
+
+  row.appendChild(rankEl); row.appendChild(sel); row.appendChild(dirBtn); row.appendChild(rmBtn);
+  container.appendChild(row);
+}
+
+function applySortBuilder(){
+  var rows=document.getElementById('sort-rows').querySelectorAll('.sort-row');
+  var sorters=[];
+  rows.forEach(function(row){
+    sorters.push({column:row.querySelector('select').value,dir:row.querySelector('.dir-btn').dataset.dir});
+  });
+  suppressSortSync=true;
+  if(sorters.length>0)table.setSort(sorters); else table.clearSort();
+  suppressSortSync=false;
+  updateSortBtnDot();
+}
+
+function updateSortBtnDot(){
+  var btn=document.getElementById('sort-toggle-btn');
+  var has=table.getSorters&&table.getSorters().length>0;
+  var isActive=btn.classList.contains('active');
+  var dot=has?(' <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+(isActive?'#fff':'#5b7cfa')+';vertical-align:middle"></span>'):'';
+  btn.innerHTML='&#9776; Sort <span class="arr">&#9660;</span>'+dot;
+}
+
+/* sync builder rows when sort changes via shift+click */
+table.on("dataSorted",function(sorters){
+  if(suppressSortSync)return;
+  document.getElementById('sort-rows').innerHTML='';
+  sorters.forEach(function(s){
+    var field=s.field||(s.column&&s.column.getField?s.column.getField():null);
+    if(field)addSortRow(field,s.dir||'asc');
+  });
+  updateSortBtnDot();
+});
+
+table.on("tableBuilt",function(){
+  addSortRow('idx','asc');
+  document.getElementById('row-count').textContent=tracks.length+' tracks';
+  /* Delay slightly so Tabulator's own persistence restores column state first,
+     then we layer our saved visibility on top and rebuild the checkbox UI */
+  setTimeout(function(){
+    restoreColVisibility();
+    buildColChecks();
+    updateColBtnDot();
+  }, 50);
+});
+
+/* sort panel toggle */
+document.getElementById('sort-toggle-btn').onclick=function(){
+  var btn=document.getElementById('sort-toggle-btn');
+  var panel=document.getElementById('sort-builder');
+  var open=!panel.classList.contains('collapsed');
+  panel.classList.toggle('collapsed',open);
+  btn.classList.toggle('active',!open);
+  updateSortBtnDot();
+};
+document.getElementById('sort-add-btn').onclick=function(){addSortRow();};
+document.getElementById('sort-apply-btn').onclick=function(){applySortBuilder();};
+document.getElementById('sort-clear-btn').onclick=function(){
+  document.getElementById('sort-rows').innerHTML='';
+  suppressSortSync=true; table.clearSort(); suppressSortSync=false;
+  updateSortBtnDot();
+};
+
+/* ── Column visibility ── */
+var ALL_COLS=[
+  {field:"idx",     title:"#"},
+  {field:"name",    title:"File"},
+  {field:"durRaw",  title:"Duration"},
+  {field:"ch",      title:"Channels"},
+  {field:"sr",      title:"Sample rate"},
+  {field:"singers", title:"Singers"},
+  {field:"waveform",title:"Waveform"}
+];
+
+var COL_VIS_KEY="singer-waveform-col-vis-v1";
+
+/* Save current visibility state to localStorage */
+function saveColVisibility(){
+  var state={};
+  ALL_COLS.forEach(function(c){
+    var col=table.getColumn(c.field);
+    state[c.field]=col?col.isVisible():true;
+  });
+  try{ localStorage.setItem(COL_VIS_KEY,JSON.stringify(state)); }catch(e){}
+}
+
+/* Restore visibility from localStorage, applying show/hide to each column */
+function restoreColVisibility(){
+  var state;
+  try{ state=JSON.parse(localStorage.getItem(COL_VIS_KEY)||'null'); }catch(e){}
+  if(!state) return;
+  ALL_COLS.forEach(function(c){
+    if(state[c.field]===false) table.hideColumn(c.field);
+    else                       table.showColumn(c.field);
+  });
+  updateColBtnDot();
+}
+
+/* Show a dot on the Columns button when any column is hidden */
+function updateColBtnDot(){
+  var btn=document.getElementById('col-toggle-btn');
+  var anyHidden=ALL_COLS.some(function(c){
+    var col=table.getColumn(c.field);
+    return col&&!col.isVisible();
+  });
+  var isActive=btn.classList.contains('active');
+  var dot=anyHidden?(' <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+(isActive?'#fff':'#27ae82')+';vertical-align:middle"></span>'):'';
+  btn.innerHTML='&#9638; Columns <span class="arr">&#9660;</span>'+dot;
+}
+
+function buildColChecks(){
+  var container=document.getElementById('col-checks');
+  container.innerHTML='';
+  ALL_COLS.forEach(function(c){
+    var col=table.getColumn(c.field);
+    var visible=col?col.isVisible():true;
+    var lbl=document.createElement('label');
+    lbl.className='col-check'+(visible?'':' hidden-col');
+    var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=visible; cb.dataset.field=c.field;
+    cb.onchange=function(){
+      if(cb.checked){
+        table.showColumn(c.field);
+        lbl.classList.remove('hidden-col');
+      } else {
+        table.hideColumn(c.field);
+        lbl.classList.add('hidden-col');
+      }
+      saveColVisibility();
+      updateColBtnDot();
+    };
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(' '+c.title));
+    container.appendChild(lbl);
+  });
+}
+
+/* column panel toggle */
+document.getElementById('col-toggle-btn').onclick=function(){
+  var btn=document.getElementById('col-toggle-btn');
+  var panel=document.getElementById('col-panel');
+  var open=!panel.classList.contains('collapsed');
+  if(!open) buildColChecks(); /* refresh checkbox states each time it opens */
+  panel.classList.toggle('collapsed',open);
+  btn.classList.toggle('active',!open);
+  updateColBtnDot();
+};
+
+/* header filters toggle */
+var hfVisible = false;
+function setHeaderFilters(show){
+  hfVisible = show;
+  /* Tabulator renders header filters as .tabulator-header-filter elements inside each col */
+  document.querySelectorAll('#tbl .tabulator-header-filter').forEach(function(el){
+    el.style.display = show ? '' : 'none';
+  });
+  /* also clear all active header filters when hiding */
+  if(!show) table.clearHeaderFilter();
+  var btn = document.getElementById('hf-toggle-btn');
+  btn.classList.toggle('active', show);
+}
+
+document.getElementById('hf-toggle-btn').onclick = function(){
+  setHeaderFilters(!hfVisible);
+};
+
+/* hide header filters by default on load */
+table.on("tableBuilt", function(){
+  setTimeout(function(){ setHeaderFilters(false); }, 60);
+});
+table.on("dataFiltered",function(f,rows){
+  document.getElementById('row-count').textContent=rows.length+' track'+(rows.length!==1?'s':'');
+  /* re-apply filter row visibility after Tabulator rebuilds header on filter change */
+  setTimeout(function(){ setHeaderFilters(hfVisible); }, 30);
+});
+
+document.getElementById('zoom').oninput=function(){
+  currentZoom=parseFloat(this.value);
+  document.getElementById('zoom-val').textContent=currentZoom.toFixed(1)+'x';
+  table.getRows().forEach(function(row){
+    var cell=row.getCell('waveform');
+    if(cell)cell.getElement().innerHTML=buildSVG(row.getData());
+  });
+};
+
+var searchTimer;
+document.getElementById('srch').oninput=function(){
+  clearTimeout(searchTimer);
+  var q=this.value.toLowerCase().trim();
+  searchTimer=setTimeout(function(){
+    table.clearFilter();
+    if(q) table.setFilter(function(r){
+      return r.name.toLowerCase().indexOf(q)!==-1
+          || r.genre.toLowerCase().indexOf(q)!==-1
+          || r.segs.some(function(s){return s.singer.toLowerCase().indexOf(q)!==-1;});
+    });
+  },220);
+};
+</script>
+</body>
+</html>
