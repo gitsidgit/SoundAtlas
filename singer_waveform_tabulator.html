@@ -213,17 +213,31 @@ function buildSVG(track){
     fills+='<polygon points="'+x0+","+mid+" "+top+x1+","+mid+" "+bot+'" fill="'+col+'" fill-opacity="0.28"/>';
     lines+='<polyline points="'+x0+","+mid+" "+top+x1+","+mid+'" fill="none" stroke="'+col+'" stroke-width="1.5"/>';
   }
+  /* Red overlay for fake segments */
+  var fakeOverlay="";
+  if(track.fakeSegments&&track.fakeSegments.length){
+    track.fakeSegments.forEach(function(fs){
+      var fx0=(fs.start/track.durRaw*W).toFixed(1);
+      var fw=Math.max(1,((fs.end-fs.start)/track.durRaw*W)).toFixed(1);
+      var op=(0.2+((fs.score||0.5)*0.35)).toFixed(2);
+      fakeOverlay+='<rect x="'+fx0+'" y="0" width="'+fw+'" height="'+H+'" fill="#e74c3c" fill-opacity="'+op+'" rx="1"/>';
+    });
+  }
   return '<svg class="wv" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'
         +'<rect width="'+W+'" height="'+H+'" fill="#f7f8fa"/>'
         +'<line x1="0" y1="'+mid+'" x2="'+W+'" y2="'+mid+'" stroke="#ddd" stroke-width="0.8"/>'
         +'<polyline points="'+gp+'" fill="none" stroke="#ccc" stroke-width="0.9"/>'
-        +fills+lines+'</svg>';
+        +fills+lines+fakeOverlay+'</svg>';
 }
 
 /* ── Cell formatters ── */
 function fmtName(cell){
   var r=cell.getRow().getData();
-  return '<div class="song-title" title="'+r.name+'">'+r.name+'</div><div class="song-sub">'+(r.genre||'')+'</div>';
+  var meta=r.genre||'';
+  if(r.language&&r.language!=='unknown') meta+=(meta?' · ':'')+r.language.toUpperCase();
+  if(r.gender&&r.gender!=='unknown')     meta+=(meta?' · ':'')+r.gender;
+  return '<div class="song-title" title="'+r.name+'">'+r.name+'</div>'
+        +'<div class="song-sub">'+(meta||'&mdash;')+'</div>';
 }
 function fmtDuration(cell){ return '<span class="badge-dur">'+fmtDur(cell.getValue())+'</span>'; }
 function fmtChannels(cell){ return '<span class="badge-ch">'+(cell.getValue()===1?'Mono':'Stereo')+'</span>'; }
@@ -235,6 +249,21 @@ function fmtSingers(cell){
   }).join("");
 }
 function fmtWaveform(cell){ return buildSVG(cell.getRow().getData()); }
+function fmtIntegrity(cell){
+  var r=cell.getRow().getData();
+  if(r.verdict===undefined||r.verdict===null) return '<span style="color:#ccc;font-size:10px">—</span>';
+  var colors={
+    'GENUINE':      ['#edfaf1','#1a9e5a'],
+    'PARTIAL_FAKE': ['#fff8e1','#e67e22'],
+    'SYNTHETIC':    ['#fdecea','#c0392b'],
+    'UNKNOWN':      ['#f5f5f5','#999']
+  };
+  var c=colors[r.verdict]||colors['UNKNOWN'];
+  var score=r.integrity!==null&&r.integrity!==undefined
+    ? ' <span style="font-size:9px;opacity:.7">'+Math.round(r.integrity*100)+'%</span>' : '';
+  return '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:8px;font-size:10px;font-weight:600;background:'+c[0]+';color:'+c[1]+'">'
+        +r.verdict.replace('_',' ')+score+'</span>';
+}
 
 /* ── initTable — called after data is ready ── */
 function initTable(){
@@ -261,7 +290,7 @@ function initTable(){
     leg.appendChild(d);
   });
 
-  if(table) table.destroy();
+  if(table && table.getData && table.getData().length > 0){ table.destroy(); table = null; }
 
   table = new Tabulator("#tbl",{
     data:           tracks,
@@ -273,30 +302,38 @@ function initTable(){
     resizableColumns: true,
     headerSortTristate: true,
     persistenceID:  "soundatlas-gallery-v1",
-    persistence:    {sort:true,filter:true,headerFilter:true,group:true,page:true,columns:true},
+    persistence:    {sort:true,filter:true,page:true},  /* columns handled by our own saveColVisibility */
     columnDefaults: {resizable:true,headerSort:false},
     rowFormatter:   function(){},
     columns:[
-      {title:"#",           field:"idx",      width:42,  headerSort:true, sorter:"number"},
-      {title:"File",        field:"name",     width:175, headerSort:true, sorter:"string",  formatter:fmtName},
-      {title:"Duration",    field:"durRaw",   width:80,  headerSort:true, sorter:"number",  formatter:fmtDuration},
-      {title:"Channels",    field:"ch",       width:80,  headerSort:true, sorter:"number",  formatter:fmtChannels},
-      {title:"Sample rate", field:"sr",       width:95,  headerSort:true, sorter:"number",  formatter:fmtSampleRate},
-      {title:"Speakers",    field:"singers",  width:190, headerSort:false,                  formatter:fmtSingers},
-      {title:"Waveform \u25b6",field:"waveform",width:260,headerSort:false,                 formatter:fmtWaveform,
+      {title:"#",           field:"idx",       width:42,  headerSort:true, sorter:"number"},
+      {title:"File",        field:"name",      width:175, headerSort:true, sorter:"string",  formatter:fmtName},
+      {title:"Duration",    field:"durRaw",    width:80,  headerSort:true, sorter:"number",  formatter:fmtDuration},
+      {title:"Channels",    field:"ch",        width:80,  headerSort:true, sorter:"number",  formatter:fmtChannels},
+      {title:"Sample rate", field:"sr",        width:95,  headerSort:true, sorter:"number",  formatter:fmtSampleRate},
+      {title:"Integrity",   field:"verdict",   width:120, headerSort:true, sorter:"string",  formatter:fmtIntegrity},
+      {title:"Speakers",    field:"singers",   width:190, headerSort:false,                  formatter:fmtSingers},
+      {title:"Waveform \u25b6",field:"waveform",width:260,headerSort:false,                  formatter:fmtWaveform,
        cellClick:function(e,cell){ openWaveSurfer(cell.getRow().getData()); }}
     ]
   });
 
+  var tableBuiltFired = false;
   table.on("tableBuilt",function(){
+    if(tableBuiltFired) return;
+    tableBuiltFired = true;
     document.getElementById('row-count').textContent=tracks.length+' track'+(tracks.length!==1?'s':'');
-    addSortRow('idx','asc');
+    /* Defer everything that touches column/sort state until after
+       Tabulator finishes its own post-build work */
     setTimeout(function(){
       restoreColVisibility();
       buildColChecks();
       updateColBtnDot();
       setHeaderFilters(false);
-    },60);
+      if(document.getElementById('sort-rows').querySelectorAll('.sort-row').length===0){
+        addSortRow('idx','asc');
+      }
+    }, 100);
   });
 
   table.on("dataSorted",function(sorters){
@@ -345,11 +382,13 @@ fetch('gallery.json')
 
 /* ── Sort builder ── */
 var SORTABLE_COLS=[
-  {field:"idx",    label:"#"},
-  {field:"name",   label:"File"},
-  {field:"durRaw", label:"Duration"},
-  {field:"ch",     label:"Channels"},
-  {field:"sr",     label:"Sample rate"}
+  {field:"idx",      label:"#"},
+  {field:"name",     label:"File"},
+  {field:"durRaw",   label:"Duration"},
+  {field:"ch",       label:"Channels"},
+  {field:"sr",       label:"Sample rate"},
+  {field:"verdict",  label:"Integrity"},
+  {field:"integrity",label:"Integrity score"}
 ];
 function renderSortRanks(){
   var rows=document.getElementById('sort-rows').querySelectorAll('.sort-row');
@@ -404,13 +443,14 @@ document.getElementById('sort-clear-btn').onclick=function(){
 
 /* ── Column visibility ── */
 var ALL_COLS=[
-  {field:"idx",     title:"#"},
-  {field:"name",    title:"File"},
-  {field:"durRaw",  title:"Duration"},
-  {field:"ch",      title:"Channels"},
-  {field:"sr",      title:"Sample rate"},
-  {field:"singers", title:"Speakers"},
-  {field:"waveform",title:"Waveform"}
+  {field:"idx",      title:"#"},
+  {field:"name",     title:"File"},
+  {field:"durRaw",   title:"Duration"},
+  {field:"ch",       title:"Channels"},
+  {field:"sr",       title:"Sample rate"},
+  {field:"verdict",  title:"Integrity"},
+  {field:"singers",  title:"Speakers"},
+  {field:"waveform", title:"Waveform"}
 ];
 var COL_VIS_KEY="soundatlas-col-vis-v1";
 function saveColVisibility(){
@@ -453,11 +493,12 @@ document.getElementById('col-toggle-btn').onclick=function(){
 /* ── Header filters ── */
 var hfVisible=false;
 var HF_CONFIG={
-  "idx":    {headerFilter:"input",  headerFilterParams:{}},
-  "name":   {headerFilter:"input",  headerFilterParams:{}},
-  "durRaw": {headerFilter:"number", headerFilterParams:{}},
-  "ch":     {headerFilter:"list",   headerFilterParams:{values:{"":"-All-",1:"Mono",2:"Stereo"},clearable:true}},
-  "sr":     {headerFilter:"list",   headerFilterParams:{values:{"":"-All-",22050:"22kHz",44100:"44.1kHz",48000:"48kHz"},clearable:true}}
+  "idx":     {headerFilter:"input",  headerFilterParams:{}},
+  "name":    {headerFilter:"input",  headerFilterParams:{}},
+  "durRaw":  {headerFilter:"number", headerFilterParams:{}},
+  "ch":      {headerFilter:"list",   headerFilterParams:{values:{"":"-All-",1:"Mono",2:"Stereo"},clearable:true}},
+  "sr":      {headerFilter:"list",   headerFilterParams:{values:{"":"-All-",22050:"22kHz",44100:"44.1kHz",48000:"48kHz"},clearable:true}},
+  "verdict": {headerFilter:"list",   headerFilterParams:{values:{"":"-All-","GENUINE":"Genuine","PARTIAL_FAKE":"Partial fake","SYNTHETIC":"Synthetic","UNKNOWN":"Unknown"},clearable:true}}
 };
 function setHeaderFilters(show){
   hfVisible=show;
@@ -498,9 +539,17 @@ var ws=null;
 function openWaveSurfer(track){
   /* Populate header */
   document.getElementById('ws-title').textContent=track.name;
-  document.getElementById('ws-meta').textContent=
-    fmtDur(track.durRaw)+' \u2022 '+(track.sr/1000).toFixed(1)+'kHz \u2022 '+(track.ch===1?'Mono':'Stereo')+
-    (track.segs.length?' \u2022 '+track.segs.length+' segment'+(track.segs.length!==1?'s':''):'');
+  var metaParts=[
+    fmtDur(track.durRaw),
+    (track.sr/1000).toFixed(1)+'kHz',
+    track.ch===1?'Mono':'Stereo'
+  ];
+  if(track.totalSpeechSec) metaParts.push('speech '+track.totalSpeechSec+'s');
+  if(track.silenceSec)     metaParts.push('silence '+track.silenceSec+'s');
+  if(track.language&&track.language!=='unknown') metaParts.push(track.language.toUpperCase());
+  if(track.gender&&track.gender!=='unknown')     metaParts.push(track.gender);
+  if(track.verdict)        metaParts.push(track.verdict.replace('_',' '));
+  document.getElementById('ws-meta').textContent=metaParts.join(' \u2022 ');
 
   /* Speaker legend in modal */
   var legEl=document.getElementById('ws-legend'); legEl.innerHTML='';
@@ -536,13 +585,14 @@ function openWaveSurfer(track){
     barRadius:     2,
     peaks:         track.peaks?[track.peaks.data]:undefined,
     duration:      track.durRaw,
-    url:           track.name  /* expects audio file in same folder as gallery.json */
+    url:           track.audio_path || track.name  /* audio_path = absolute path from pipeline */
   });
 
-  /* Speaker regions */
+  /* Speaker + fake segment regions */
   var RegionsPlugin=WaveSurfer.Regions.create();
   ws.registerPlugin(RegionsPlugin);
   ws.on('ready',function(){
+    /* Speaker regions */
     track.segs.forEach(function(seg){
       RegionsPlugin.addRegion({
         start:  seg.start,
@@ -552,6 +602,19 @@ function openWaveSurfer(track){
         resize: false
       });
     });
+    /* Fake segment regions — red overlay */
+    if(track.fakeSegments && track.fakeSegments.length){
+      track.fakeSegments.forEach(function(fs){
+        RegionsPlugin.addRegion({
+          start:   fs.start,
+          end:     fs.end,
+          color:   'rgba(231,76,60,0.35)',
+          drag:    false,
+          resize:  false,
+          content: 'FAKE'
+        });
+      });
+    }
   });
 
   /* Progress updates */
