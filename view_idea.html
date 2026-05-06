@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WaveForm Navigator</title>
+
+<!-- Bootstrap 5 -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Tabulator 6 -->
+<link href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_bootstrap5.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
+
+<style>
+  /* canvas containers */
+  .cv-wrap {
+    position: relative;
+    border: 1px solid #dee2e6;
+    border-radius: .375rem;
+    overflow: hidden;
+    background: #f8f9fa;
+    cursor: crosshair;
+  }
+  canvas { width: 100%; display: block; }
+
+  /* brush overlay on overview */
+  #brush {
+    position: absolute;
+    top: 0; height: 100%;
+    background: rgba(13,110,253,.1);
+    border-left: 2px solid #0d6efd;
+    border-right: 2px solid #0d6efd;
+    pointer-events: none;
+  }
+
+  /* axis labels */
+  .axis-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: .7rem;
+    color: #6c757d;
+    margin-top: 2px;
+    padding: 0 2px;
+  }
+
+  /* filter pills */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    border: 1px solid #dee2e6;
+    font-size: .75rem;
+    cursor: pointer;
+    background: #fff;
+    margin: 2px;
+  }
+  .pill.on { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* scope toggle */
+  .scope-group .btn { font-size: .75rem; padding: .25rem .65rem; }
+
+  /* row expand panel */
+  .exp-box { padding: .6rem .75rem; background: #f8f9fa; border-top: 1px solid #dee2e6; font-size: .75rem; }
+  .exp-tl  { position: relative; height: 70px; border: 1px solid #dee2e6; border-radius: .375rem; overflow: hidden; background: #fff; margin-bottom: .4rem; }
+
+  /* section labels */
+  .sec-label { font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #6c757d; }
+</style>
+</head>
+<body class="bg-light">
+<div class="container-fluid py-3 px-4">
+
+  <!-- header -->
+  <div class="d-flex align-items-baseline gap-3 mb-3">
+    <h5 class="mb-0 fw-semibold">Waveform Navigator</h5>
+    <span class="text-muted" style="font-size:.75rem" id="hdrSpan"></span>
+  </div>
+
+  <!-- stats -->
+  <div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+      <div class="card border-0 shadow-sm text-center py-2">
+        <div class="fs-4 fw-semibold text-primary" id="stTotal">—</div>
+        <div class="text-muted" style="font-size:.7rem">Total segments</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card border-0 shadow-sm text-center py-2">
+        <div class="fs-4 fw-semibold" id="stPage">—</div>
+        <div class="text-muted" style="font-size:.7rem">This page</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card border-0 shadow-sm text-center py-2">
+        <div class="fs-4 fw-semibold text-success" id="stVis">—</div>
+        <div class="text-muted" style="font-size:.7rem">In view</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card border-0 shadow-sm text-center py-2">
+        <div class="fs-4 fw-semibold text-secondary" id="stZoom">1×</div>
+        <div class="text-muted" style="font-size:.7rem">Zoom</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- overview -->
+  <div class="sec-label mb-1">Overview — drag brush to navigate</div>
+  <div class="cv-wrap mb-1" id="ovWrap">
+    <canvas id="ovCanvas" height="64"></canvas>
+    <div id="brush"></div>
+  </div>
+  <div class="axis-row mb-3">
+    <span id="ovL"></span><span id="ovM"></span><span id="ovR"></span>
+  </div>
+
+  <!-- detail -->
+  <div class="sec-label mb-1">Detail — click segment to zoom in</div>
+  <div class="cv-wrap mb-1">
+    <canvas id="detCanvas" height="80"></canvas>
+  </div>
+  <div class="axis-row mb-3">
+    <span id="detL"></span><span id="detM"></span><span id="detR"></span>
+  </div>
+
+  <!-- legend -->
+  <div id="legend" class="d-flex flex-wrap gap-2 mb-2" style="font-size:.75rem"></div>
+
+  <!-- controls -->
+  <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-outline-secondary" onclick="doZoom(2)">2×</button>
+      <button class="btn btn-outline-secondary" onclick="doZoom(5)">5×</button>
+      <button class="btn btn-outline-secondary" onclick="doZoom(10)">10×</button>
+      <button class="btn btn-outline-secondary" onclick="doZoom(1)">Reset</button>
+    </div>
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-outline-secondary" onclick="doPan(-0.15)">&#9664; Pan</button>
+      <button class="btn btn-outline-secondary" onclick="doPan(0.15)">Pan &#9654;</button>
+    </div>
+    <button class="btn btn-sm btn-outline-danger" onclick="zoomErrors()">Errors only</button>
+
+    <!-- scope toggle — only affects detail canvas, not overview -->
+    <div class="btn-group btn-group-sm scope-group ms-auto">
+      <button class="btn btn-primary" id="btnAll" onclick="setScope('all')">All data</button>
+      <button class="btn btn-outline-primary" id="btnPage" onclick="setScope('page')">This page</button>
+    </div>
+  </div>
+
+  <!-- filter pills + colour-by -->
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <span class="sec-label">Filter:</span>
+    <div id="pills"></div>
+    <div class="ms-auto d-flex align-items-center gap-1">
+      <label class="sec-label mb-0" for="colorBySel">Colour by</label>
+      <select id="colorBySel" class="form-select form-select-sm" style="width:auto"
+              onchange="changeColorBy(this.value)"></select>
+    </div>
+  </div>
+
+  <!-- error banner -->
+  <div id="errBanner" class="alert alert-danger py-1 px-2 d-none" style="font-size:.75rem"></div>
+
+  <!-- tabulator -->
+  <div id="tabulator"></div>
+
+</div><!-- /container -->
+
+<script>
+// ── palette & wave types ──────────────────────────────────────────────────────
+const PAL  = ['#0d6efd','#fd7e14','#dc3545','#198754','#6f42c1','#d63384','#0dcaf0','#ffc107'];
+const WTYPES = ['sine','square','sawtooth','noise','ecg','stepped'];
+
+// ── state ─────────────────────────────────────────────────────────────────────
+let allData=[], globalMin=0, globalMax=1, globalSpan=1;
+let viewStart=0, viewEnd=1;
+let colorBy='level', activeFilters={}, colorMaps={};
+let table=null, scope='all', pageIds=new Set(), busy=false;
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+function showErr(m) {
+  const el=document.getElementById('errBanner');
+  el.textContent='Error: '+m; el.classList.remove('d-none');
+}
+function fmtD(ts) {
+  return new Date(ts).toLocaleString('en-GB',
+    {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function fmtS(ms) {
+  if(ms<60000)  return Math.round(ms)+'ms';
+  if(ms<3600000) return Math.round(ms/60000)+'m';
+  if(ms<86400000) return (ms/3600000).toFixed(1)+'h';
+  return (ms/86400000).toFixed(1)+'d';
+}
+function vPct(ts)  { return Math.max(0,Math.min(1,(ts-globalMin)/globalSpan)); }
+function inView(r) {
+  const vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
+  return r._te>vs && r._ts<ve;
+}
+function rowColor(r) { return colorMaps[colorBy]?.[String(r[colorBy]??'')] || PAL[0]; }
+function getFiltered() {
+  return Object.keys(activeFilters).length
+    ? allData.filter(r=>activeFilters[String(r[colorBy]??'')]!==false)
+    : allData;
+}
+function getVisible()  { return getFiltered().filter(inView); }
+
+// Detail canvas shows only pageIds when scope==='page'; overview always shows all.
+function getDetailRows() {
+  const base=getFiltered().filter(inView);
+  return (scope==='page' && pageIds.size) ? base.filter(r=>pageIds.has(r.id)) : base;
+}
+
+// ── seeded RNG ────────────────────────────────────────────────────────────────
+function mkRng(seed) {
+  let s=seed;
+  return () => { s=(s*1664525+1013904223)>>>0; return s/4294967296; };
+}
+
+// ── waveform ──────────────────────────────────────────────────────────────────
+function makeWave(seed, color) {
+  const rng=mkRng(seed+1), type=WTYPES[seed%WTYPES.length];
+  const W=400, H=80, mid=H/2, pts=[];
+  if(type==='sine') {
+    const f=1+(seed%4), amp=20+rng()*12, ph=rng()*Math.PI*2;
+    for(let x=0;x<=W;x+=3)
+      pts.push([x, mid-Math.sin(f*2*Math.PI*x/W+ph)*amp
+                   -Math.sin(f*2.7*2*Math.PI*x/W)*amp*.28+(rng()-.5)*2]);
+  } else if(type==='square') {
+    const f=2+(seed%3), amp=18+rng()*10;
+    for(let x=0;x<=W;x+=2) {
+      const v=Math.sin(f*2*Math.PI*x/W)>0?1:-1;
+      pts.push([x, mid-v*amp+(rng()-.5)*3]);
+    }
+  } else if(type==='sawtooth') {
+    const f=2+(seed%4), amp=18+rng()*10;
+    for(let x=0;x<=W;x+=2) {
+      const ph=(x/W*f)%1; pts.push([x, mid-(ph*2-1)*amp+(rng()-.5)*3]);
+    }
+  } else if(type==='noise') {
+    let prev=mid;
+    for(let x=0;x<=W;x+=3) { prev=prev*.65+(mid+(rng()-.5)*46)*.35; pts.push([x,prev]); }
+  } else if(type==='ecg') {
+    for(let x=0;x<=W;x+=2) {
+      const p=(x%90)/90; let y=mid+(rng()-.5)*2;
+      if(p>.25&&p<.3)  y=mid-30;
+      else if(p>.3&&p<.35) y=mid+12;
+      else if(p>.35&&p<.4) y=mid-6;
+      pts.push([x,y]);
+    }
+  } else { // stepped
+    const steps=5+(seed%4), amp=15+rng()*10;
+    for(let x=0;x<=W;x+=2) {
+      const st=Math.floor(x/W*steps);
+      pts.push([x, mid-(st%2===0?1:-1)*amp+(rng()-.5)*3]);
+    }
+  }
+  return {type, pts, color, W, H};
+}
+
+function waveToSVG(w) {
+  const d=w.pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  return `<svg viewBox="0 0 ${w.W} ${w.H}" preserveAspectRatio="none"
+    width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+    <path d="${d}" fill="none" stroke="${w.color}"
+      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+// ── demo data ─────────────────────────────────────────────────────────────────
+function buildDemo() {
+  const LEVELS=['INFO','INFO','WARN','ERROR','INFO','WARN'];
+  const CHANS =['ch-1','ch-2','ch-3','ch-4'];
+  const TYPES =['metric','log','trace','alert'];
+  const rng=mkRng(7);
+  const rows=[]; let t=new Date('2024-03-01T08:00:00Z').getTime();
+  for(let i=0;i<150;i++) {
+    const dur=(15+rng()*300)*60000;
+    rows.push({
+      id: i+1,
+      timestamp: new Date(t).toISOString(),
+      end_time:  new Date(t+dur).toISOString(),
+      channel: CHANS[i%4],
+      level:   LEVELS[i%6],
+      type:    TYPES[i%4],
+      label:   'seg-'+String(i+1).padStart(3,'0'),
+      wave:    makeWave(i, PAL[i%PAL.length])
+    });
+    t += dur + (8+rng()*120)*60000;
+  }
+  return rows;
+}
+
+function buildColorMaps(data) {
+  colorMaps={};
+  const skip=['_ts','_te','wave','timestamp','end_time','id'];
+  Object.keys(data[0]).filter(k=>!skip.includes(k)).forEach(col=>{
+    const vals=[...new Set(data.map(r=>String(r[col]??'')))].sort();
+    const m={}; vals.forEach((v,i)=>m[v]=PAL[i%PAL.length]);
+    colorMaps[col]=m;
+  });
+}
+
+// ── tabulator ─────────────────────────────────────────────────────────────────
+function snapshotPage() {
+  if(!table) return;
+  try {
+    const active=table.getData('active');
+    const ps=table.getPageSize(), pg=table.getPage();
+    const sl=active.slice((pg-1)*ps, pg*ps);
+    pageIds=new Set(sl.map(r=>r.id));
+    document.getElementById('stPage').textContent=sl.length;
+  } catch(e) { pageIds=new Set(); }
+}
+
+function levelBadge(v) {
+  const map={'ERROR':'danger','WARN':'warning','INFO':'secondary'};
+  const cls=map[v]||'secondary';
+  return `<span class="badge text-bg-${cls}" style="font-size:.68rem">${v}</span>`;
+}
+
+function initTable(data) {
+  if(typeof Tabulator==='undefined') { showErr('Tabulator failed to load'); return; }
+  table=new Tabulator('#tabulator', {
+    data,
+    height: '480px',
+    layout: 'fitColumns',
+    pagination: 'local',
+    paginationSize: 25,
+    paginationSizeSelector: [10,25,50,100],
+    columns: [
+      {title:'#',      field:'id',      width:50, hozAlign:'right'},
+      {title:'Signal', width:110, formatter: cell=>{
+        const w=cell.getRow().getData().wave;
+        return w?`<div style="height:30px">${waveToSVG(w)}</div>`:'';
+      }},
+      {title:'Level',  field:'level',   width:80, formatter: cell=>levelBadge(cell.getValue())},
+      {title:'Channel',field:'channel', width:90},
+      {title:'Type',   field:'type',    width:76},
+      {title:'Label',  field:'label',   width:90},
+      {title:'Start',  field:'timestamp',width:130,
+        formatter: cell=>fmtD(new Date(cell.getValue()).getTime())},
+      {title:'Dur',    width:60,
+        formatter: cell=>{ const r=cell.getRow().getData(); return fmtS(r._te-r._ts); }},
+      {title:'Position in view', formatter: cell=>{
+        const r=cell.getRow().getData();
+        const vs=globalMin+viewStart*globalSpan,
+              ve=globalMin+viewEnd*globalSpan, sp=ve-vs||1;
+        const l=((Math.max(r._ts,vs)-vs)/sp*100).toFixed(1);
+        const w=Math.max(0.3,(Math.min(r._te,ve)-Math.max(r._ts,vs))/sp*100).toFixed(1);
+        const c=rowColor(r);
+        return `<div style="height:10px;background:#e9ecef;border-radius:2px;overflow:hidden;position:relative;margin:3px 0">
+          <div style="position:absolute;left:${l}%;width:${w}%;height:100%;background:${c}"></div></div>`;
+      }}
+    ],
+    rowClick(e, row) {
+      const el=row.getElement();
+      const ex=el.querySelector('.exp-box');
+      if(ex) { ex.remove(); return; }
+      const d=row.getData(), c=rowColor(d), w=d.wave;
+      const vs=globalMin+viewStart*globalSpan,
+            ve=globalMin+viewEnd*globalSpan, sp=ve-vs||1;
+      const l =((Math.max(d._ts,vs)-vs)/sp*100).toFixed(2);
+      const ww=Math.max(0.3,(Math.min(d._te,ve)-Math.max(d._ts,vs))/sp*100).toFixed(2);
+      const box=document.createElement('div'); box.className='exp-box';
+      box.innerHTML=`
+        <div class="exp-tl">
+          <div style="position:absolute;top:0;left:${l}%;width:${ww}%;height:100%;
+               border-left:2px solid ${c};background:${c}14">
+            ${w?waveToSVG(w):''}
+          </div>
+        </div>
+        <div class="d-flex flex-wrap gap-3 text-muted">
+          <span><strong>Type</strong> ${w?.type||'—'}</span>
+          <span><strong>Start</strong> ${fmtD(d._ts)}</span>
+          <span><strong>End</strong> ${fmtD(d._te)}</span>
+          <span><strong>Duration</strong> ${fmtS(d._te-d._ts)}</span>
+        </div>`;
+      el.appendChild(box);
+    },
+    pageLoaded() {
+      snapshotPage();
+      // scope=page: only redraw detail, NOT overview (overview always = all data)
+      if(scope==='page') drawDetail();
+    }
+  });
+}
+
+// ── pills / legend ────────────────────────────────────────────────────────────
+function buildPills() {
+  const map=colorMaps[colorBy], vals=Object.keys(map||{});
+  if(!vals.length) {
+    document.getElementById('pills').innerHTML='';
+    document.getElementById('legend').innerHTML=''; return;
+  }
+  if(!Object.keys(activeFilters).length) vals.forEach(v=>activeFilters[v]=true);
+  document.getElementById('pills').innerHTML=
+    vals.map(v=>`<div class="pill${activeFilters[v]?' on':''}" onclick="toggleFilter('${v}')">
+      <span class="dot" style="background:${map[v]}"></span>${v}</div>`).join('');
+  document.getElementById('legend').innerHTML=
+    `<span class="text-muted">Colour: <strong>${colorBy}</strong></span>` +
+    vals.map(v=>`<span class="d-flex align-items-center gap-1">
+      <span class="dot" style="background:${map[v]}"></span>${v}</span>`).join('');
+}
+function toggleFilter(v) { activeFilters[v]=!activeFilters[v]; buildPills(); refreshTable(); }
+function changeColorBy(v) { colorBy=v; activeFilters={}; buildPills(); refreshTable(); }
+
+// ── scope toggle ──────────────────────────────────────────────────────────────
+// NOTE: toggling scope only redraws the detail canvas; overview is unaffected.
+function setScope(s) {
+  scope=s;
+  document.getElementById('btnAll').className =
+    'btn btn-sm ' + (s==='all' ? 'btn-primary' : 'btn-outline-primary');
+  document.getElementById('btnPage').className =
+    'btn btn-sm ' + (s==='page' ? 'btn-primary' : 'btn-outline-primary');
+  drawDetail(); // overview intentionally NOT redrawn here
+}
+
+// ── canvas: overview (always all data) ───────────────────────────────────────
+function drawOverview() {
+  const cv=document.getElementById('ovCanvas');
+  const W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=64;
+  const ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,64);
+  const filtered=getFiltered();
+  const th=Math.max(1.2,(64-10)/allData.length);
+  allData.forEach((r,i)=>{
+    const x1=Math.round(vPct(r._ts)*W),
+          x2=Math.max(x1+2,Math.round(vPct(r._te)*W));
+    ctx.fillStyle=filtered.includes(r)?rowColor(r)+'88':'#ced4da';
+    ctx.fillRect(x1, 5+i*th, x2-x1, Math.max(1,th-.4));
+  });
+  const bx1=Math.round(viewStart*W), bx2=Math.round(viewEnd*W);
+  const br=document.getElementById('brush');
+  br.style.left=bx1+'px'; br.style.width=Math.max(8,bx2-bx1)+'px';
+}
+
+// ── canvas: detail (respects scope) ──────────────────────────────────────────
+function drawDetail() {
+  const cv=document.getElementById('detCanvas');
+  const W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=80;
+  const ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,80);
+  const vs=globalMin+viewStart*globalSpan,
+        ve=globalMin+viewEnd*globalSpan, sp=ve-vs||1;
+  const toX=ts=>Math.round((ts-vs)/sp*W);
+
+  // faint gridlines at quarter marks
+  ctx.strokeStyle='#dee2e6'; ctx.lineWidth=1;
+  [1,2,3].forEach(i=>{ ctx.beginPath(); ctx.moveTo(W/4*i,0); ctx.lineTo(W/4*i,80); ctx.stroke(); });
+
+  const rows=getDetailRows(); // honours scope
+  rows.forEach(r=>{
+    if(!inView(r)) return;
+    const x1=Math.max(0,toX(r._ts)),
+          x2=Math.min(W,Math.max(x1+4,toX(r._te)));
+    const c=rowColor(r), seg=x2-x1;
+    ctx.fillStyle=c+'22'; ctx.fillRect(x1,4,seg,72);
+    ctx.fillStyle=c+'cc'; ctx.fillRect(x1,4,2,72);
+    // inline waveform
+    if(r.wave && seg>12) {
+      ctx.save(); ctx.beginPath(); ctx.rect(x1,4,seg,72); ctx.clip();
+      ctx.strokeStyle=c+'bb'; ctx.lineWidth=1.2; ctx.beginPath();
+      r.wave.pts.forEach(([px,py],i)=>{
+        const nx=x1+px/r.wave.W*seg, ny=4+py/r.wave.H*72;
+        i===0?ctx.moveTo(nx,ny):ctx.lineTo(nx,ny);
+      });
+      ctx.stroke(); ctx.restore();
+    }
+  });
+}
+
+// ── axis labels (detail tracks zoom window) ───────────────────────────────────
+function updateAxisLabels() {
+  const vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
+  document.getElementById('ovL').textContent=fmtD(globalMin);
+  document.getElementById('ovM').textContent=fmtD((globalMin+globalMax)/2);
+  document.getElementById('ovR').textContent=fmtD(globalMax);
+  document.getElementById('detL').textContent=fmtD(vs);
+  document.getElementById('detM').textContent=fmtD((vs+ve)/2);
+  document.getElementById('detR').textContent=fmtD(ve);
+}
+
+function updateStats() {
+  document.getElementById('stTotal').textContent=allData.length;
+  document.getElementById('stVis').textContent=getVisible().length;
+  document.getElementById('stZoom').textContent=(1/(viewEnd-viewStart||.001)).toFixed(1)+'×';
+}
+
+// full redraw (canvases + labels + stats — does NOT touch table)
+function redraw() { drawOverview(); drawDetail(); updateAxisLabels(); updateStats(); }
+
+// ── table refresh (guarded against re-entrancy) ───────────────────────────────
+function refreshTable() {
+  if(busy||!table) return;
+  busy=true;
+  table.setData(getVisible())
+    .then(()=>{ busy=false; snapshotPage(); redraw(); })
+    .catch(e=>{ busy=false; showErr(String(e)); });
+}
+
+function updateAll() { redraw(); refreshTable(); }
+
+// ── brush interaction ─────────────────────────────────────────────────────────
+let bActive=false, bMode=null, bAnchor=0, bsSnap=0, beSnap=0;
+const ovWrap=document.getElementById('ovWrap');
+
+function ovPct(e) {
+  const r=ovWrap.getBoundingClientRect();
+  return Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+}
+ovWrap.addEventListener('mousedown',e=>{
+  const p=ovPct(e), tol=.018;
+  if(Math.abs(p-viewStart)<tol)       bMode='L';
+  else if(Math.abs(p-viewEnd)<tol)    bMode='R';
+  else if(p>viewStart&&p<viewEnd)     { bMode='M'; bAnchor=p; bsSnap=viewStart; beSnap=viewEnd; }
+  else                                { bMode='N'; bAnchor=p; viewStart=p; viewEnd=p+.001; }
+  bActive=true; e.preventDefault();
+});
+window.addEventListener('mousemove',e=>{
+  if(!bActive) return;
+  const p=ovPct(e), w=viewEnd-viewStart;
+  if(bMode==='L')      viewStart=Math.max(0,Math.min(viewEnd-.005,p));
+  else if(bMode==='R') viewEnd=Math.min(1,Math.max(viewStart+.005,p));
+  else if(bMode==='M') { const d=p-bAnchor; viewStart=Math.max(0,Math.min(1-w,bsSnap+d)); viewEnd=viewStart+w; }
+  else                 { viewStart=Math.min(bAnchor,p); viewEnd=Math.max(bAnchor,p)+.001; }
+  redraw(); // fast mid-drag: canvases only
+});
+window.addEventListener('mouseup',()=>{ if(bActive){ bActive=false; updateAll(); } });
+
+// click detail canvas to zoom into a segment
+document.getElementById('detCanvas').addEventListener('click',e=>{
+  const cv=document.getElementById('detCanvas'), rc=cv.getBoundingClientRect();
+  const ts=(globalMin+viewStart*globalSpan)
+          +((e.clientX-rc.left)/rc.width)*(viewEnd-viewStart)*globalSpan;
+  const hit=getVisible().filter(r=>r._ts<=ts&&r._te>=ts);
+  if(hit.length) {
+    const s=hit[0], pad=(s._te-s._ts)*.2;
+    viewStart=Math.max(0,(s._ts-pad-globalMin)/globalSpan);
+    viewEnd  =Math.min(1,(s._te+pad-globalMin)/globalSpan);
+    updateAll();
+  }
+});
+
+// ── zoom / pan ────────────────────────────────────────────────────────────────
+function doZoom(f) {
+  const m=(viewStart+viewEnd)/2, h=(1/f)/2;
+  viewStart=Math.max(0,m-h); viewEnd=Math.min(1,m+h); updateAll();
+}
+function doPan(d) {
+  const w=viewEnd-viewStart;
+  viewStart=Math.max(0,Math.min(1-w,viewStart+d)); viewEnd=viewStart+w; updateAll();
+}
+function zoomErrors() {
+  const errs=getFiltered().filter(r=>/ERROR|CRIT|FATAL/i.test(r.level||''));
+  if(!errs.length) { alert('No errors in current filter'); return; }
+  const pad=globalSpan*.04;
+  viewStart=Math.max(0,(Math.min(...errs.map(r=>r._ts))-pad-globalMin)/globalSpan);
+  viewEnd  =Math.min(1,(Math.max(...errs.map(r=>r._te))+pad-globalMin)/globalSpan);
+  updateAll();
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+function init() {
+  try {
+    const raw=buildDemo();
+    allData=raw
+      .map(r=>({...r, _ts:new Date(r.timestamp).getTime(), _te:new Date(r.end_time).getTime()}))
+      .sort((a,b)=>a._ts-b._ts);
+    globalMin=allData[0]._ts;
+    globalMax=Math.max(...allData.map(r=>r._te));
+    globalSpan=globalMax-globalMin||1;
+
+    buildColorMaps(allData);
+    const cats=Object.keys(colorMaps);
+    colorBy=cats.includes('level')?'level':cats[0]||'';
+
+    const sel=document.getElementById('colorBySel');
+    cats.forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; sel.appendChild(o); });
+    sel.value=colorBy;
+
+    document.getElementById('hdrSpan').textContent=
+      fmtD(globalMin)+' → '+fmtD(globalMax);
+
+    buildPills();
+    initTable(allData);
+
+    // give Tabulator two frames to finish its first render before reading page state
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{ snapshotPage(); redraw(); }));
+  } catch(e) { showErr(String(e)); }
+}
+
+setTimeout(init, 200);
+</script>
+</body>
+</html>
