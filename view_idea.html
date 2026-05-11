@@ -3,597 +3,794 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WaveForm Navigator</title>
-
-<!-- Bootstrap 5 -->
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-<!-- Tabulator 6 -->
-<link href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_bootstrap5.min.css" rel="stylesheet">
+<title>Timeline Navigator</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/js/bootstrap.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_bootstrap3.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
-
 <style>
-  /* canvas containers */
-  .cv-wrap {
-    position: relative;
-    border: 1px solid #dee2e6;
-    border-radius: .375rem;
-    overflow: hidden;
-    background: #f8f9fa;
-    cursor: crosshair;
-  }
-  canvas { width: 100%; display: block; }
+  body { background:#f5f5f5; font-size:13px; }
+  .page-wrap { max-width:1400px; margin:0 auto; padding:16px; }
+  .stat-box { background:#fff; border:1px solid #ddd; border-radius:4px; text-align:center; padding:10px 8px; }
+  .stat-box .num { font-size:22px; font-weight:600; color:#337ab7; line-height:1.1; }
+  .stat-box .lbl { font-size:10px; color:#999; text-transform:uppercase; letter-spacing:.06em; margin-top:2px; }
+  .sec-lbl { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:#999; }
 
-  /* brush overlay on overview */
-  #brush {
-    position: absolute;
-    top: 0; height: 100%;
-    background: rgba(13,110,253,.1);
-    border-left: 2px solid #0d6efd;
-    border-right: 2px solid #0d6efd;
-    pointer-events: none;
-  }
+  /*
+   * FIX 1: cursor classes on the overview wrapper indicate which zone the mouse is in.
+   * ew-resize = near a handle edge (resize), grab = inside brush body (pan),
+   * crosshair = outside brush (draw new).
+   */
+  #ovWrap { position:relative; border:1px solid #ddd; border-radius:4px;
+            overflow:hidden; background:#fafafa;
+            -webkit-user-select:none; -ms-user-select:none; user-select:none;
+            cursor:crosshair; }
+  #ovWrap.cur-ew       { cursor:ew-resize; }
+  #ovWrap.cur-grab     { cursor:grab; }
+  #ovWrap.cur-grabbing { cursor:grabbing; }
 
-  /* axis labels */
-  .axis-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: .7rem;
-    color: #6c757d;
-    margin-top: 2px;
-    padding: 0 2px;
-  }
-
-  /* filter pills */
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 10px;
-    border-radius: 9999px;
-    border: 1px solid #dee2e6;
-    font-size: .75rem;
-    cursor: pointer;
-    background: #fff;
-    margin: 2px;
-  }
-  .pill.on { background: #0d6efd; color: #fff; border-color: #0d6efd; }
-  .pill .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-
-  /* scope toggle */
-  .scope-group .btn { font-size: .75rem; padding: .25rem .65rem; }
-
-  /* row expand panel */
-  .exp-box { padding: .6rem .75rem; background: #f8f9fa; border-top: 1px solid #dee2e6; font-size: .75rem; }
-  .exp-tl  { position: relative; height: 70px; border: 1px solid #dee2e6; border-radius: .375rem; overflow: hidden; background: #fff; margin-bottom: .4rem; }
-
-  /* section labels */
-  .sec-label { font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #6c757d; }
+  canvas { width:100%; display:block; }
+  #brush { position:absolute; top:0; height:100%; pointer-events:none; }
+  #brushTip { position:absolute; bottom:4px; left:50%; -webkit-transform:translateX(-50%);
+              transform:translateX(-50%); background:rgba(0,0,0,.68); color:#fff;
+              font-size:9px; padding:2px 7px; border-radius:3px; white-space:nowrap;
+              pointer-events:none; }
+  .axis-row { display:-webkit-box; display:-ms-flexbox; display:flex;
+              -webkit-box-pack:justify; -ms-flex-pack:justify; justify-content:space-between;
+              font-size:10px; color:#999; margin-top:3px; padding:0 2px; }
+  .sel-bar { font-size:11px; color:#555; background:#fff; border:1px solid #ddd;
+             border-radius:4px; padding:5px 12px; }
+  .sel-bar span { margin-right:18px; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:9999px;
+          border:1px solid #ddd; font-size:11px; cursor:pointer; background:#fff; margin:2px; }
+  .pill.on { background:#337ab7; color:#fff; border-color:#2e6da4; }
+  .pill .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+               margin-right:4px; vertical-align:middle; }
+  #legend { font-size:11px; color:#777; }
+  #legend .leg-item { display:inline-block; margin-right:10px; }
+  .detail-toggle { background:none; border:none; padding:0; cursor:pointer; }
+  .detail-body { overflow:hidden; -webkit-transition:max-height .25s ease; transition:max-height .25s ease; }
+  .det-wrap { position:relative; border:1px solid #ddd; border-radius:4px;
+              overflow:hidden; background:#fafafa; cursor:crosshair; }
+  .exp-box { padding:8px 12px; background:#f9f9f9; border-top:1px solid #eee; font-size:11px; color:#666; }
+  .exp-tl  { position:relative; height:70px; border:1px solid #ddd; border-radius:4px;
+             overflow:hidden; background:#fff; margin-bottom:6px; }
+  /* FIX 5: focused row highlight in table */
+  .tabulator-row.row-focused { background:#fff8e1 !important; outline:2px solid #f0ad4e; outline-offset:-2px; }
+  #errBanner { display:none; }
+  .btn-scope-on { background-color:#337ab7 !important; color:#fff !important; border-color:#2e6da4 !important; }
 </style>
 </head>
-<body class="bg-light">
-<div class="container-fluid py-3 px-4">
+<body>
+<div class="page-wrap">
 
-  <!-- header -->
-  <div class="d-flex align-items-baseline gap-3 mb-3">
-    <h5 class="mb-0 fw-semibold">Waveform Navigator</h5>
-    <span class="text-muted" style="font-size:.75rem" id="hdrSpan"></span>
+  <div style="margin-bottom:12px">
+    <h4 style="margin:0 0 2px">Timeline Navigator</h4>
+    <small class="text-muted" id="hdrSpan"></small>
   </div>
+  <div id="errBanner" class="alert alert-danger" style="padding:6px 10px;font-size:12px"></div>
 
   <!-- stats -->
-  <div class="row g-2 mb-3">
-    <div class="col-6 col-md-3">
-      <div class="card border-0 shadow-sm text-center py-2">
-        <div class="fs-4 fw-semibold text-primary" id="stTotal">—</div>
-        <div class="text-muted" style="font-size:.7rem">Total segments</div>
-      </div>
+  <div class="row" style="margin-bottom:14px">
+    <div class="col-xs-6 col-sm-3" style="padding:0 6px">
+      <div class="stat-box"><div class="num" id="stTotal">—</div><div class="lbl">Total segments</div></div>
     </div>
-    <div class="col-6 col-md-3">
-      <div class="card border-0 shadow-sm text-center py-2">
-        <div class="fs-4 fw-semibold" id="stPage">—</div>
-        <div class="text-muted" style="font-size:.7rem">This page</div>
-      </div>
+    <div class="col-xs-6 col-sm-3" style="padding:0 6px">
+      <div class="stat-box"><div class="num" style="color:#555" id="stPage">—</div><div class="lbl">This page</div></div>
     </div>
-    <div class="col-6 col-md-3">
-      <div class="card border-0 shadow-sm text-center py-2">
-        <div class="fs-4 fw-semibold text-success" id="stVis">—</div>
-        <div class="text-muted" style="font-size:.7rem">In view</div>
-      </div>
+    <div class="col-xs-6 col-sm-3" style="padding:0 6px;margin-top:6px">
+      <div class="stat-box"><div class="num" style="color:#5cb85c" id="stVis">—</div><div class="lbl">In view</div></div>
     </div>
-    <div class="col-6 col-md-3">
-      <div class="card border-0 shadow-sm text-center py-2">
-        <div class="fs-4 fw-semibold text-secondary" id="stZoom">1×</div>
-        <div class="text-muted" style="font-size:.7rem">Zoom</div>
-      </div>
+    <div class="col-xs-6 col-sm-3" style="padding:0 6px;margin-top:6px">
+      <div class="stat-box"><div class="num" style="color:#777" id="stZoom">1x</div><div class="lbl">Zoom</div></div>
     </div>
   </div>
 
-  <!-- overview -->
-  <div class="sec-label mb-1">Overview — drag brush to navigate</div>
-  <div class="cv-wrap mb-1" id="ovWrap">
-    <canvas id="ovCanvas" height="64"></canvas>
-    <div id="brush"></div>
+  <!-- OVERVIEW -->
+  <div style="margin-bottom:4px">
+    <span class="sec-lbl">Overview</span>
+    <small class="text-muted" style="font-size:10px;margin-left:6px">
+      drag body to pan &nbsp;|&nbsp; drag handles to resize &nbsp;|&nbsp;
+      scroll to zoom &nbsp;|&nbsp; drag to edge to scroll
+    </small>
   </div>
-  <div class="axis-row mb-3">
+  <div id="ovWrap">
+    <canvas id="ovCanvas" height="80"></canvas>
+    <div id="brush"><div id="brushTip"></div></div>
+  </div>
+  <div class="axis-row" style="margin-bottom:6px">
     <span id="ovL"></span><span id="ovM"></span><span id="ovR"></span>
   </div>
-
-  <!-- detail -->
-  <div class="sec-label mb-1">Detail — click segment to zoom in</div>
-  <div class="cv-wrap mb-1">
-    <canvas id="detCanvas" height="80"></canvas>
+  <div class="sel-bar" style="margin-bottom:12px">
+    <span><strong>From:</strong>&nbsp;<span id="selFrom">—</span></span>
+    <span><strong>To:</strong>&nbsp;<span id="selTo">—</span></span>
+    <span><strong>Span:</strong>&nbsp;<span id="selSpan">—</span></span>
   </div>
-  <div class="axis-row mb-3">
-    <span id="detL"></span><span id="detM"></span><span id="detR"></span>
+
+  <!-- DETAIL (collapsible) -->
+  <div style="margin-bottom:4px">
+    <button class="detail-toggle" onclick="toggleDetail()">
+      <span class="sec-lbl" style="vertical-align:middle">Detail</span>
+      <span id="detCaret" style="font-size:10px;color:#aaa;vertical-align:middle">&#9660;</span>
+      <small class="text-muted" style="font-size:10px;font-weight:400;vertical-align:middle">
+        — click segment to zoom &nbsp;|&nbsp; click table row to focus here
+      </small>
+    </button>
+  </div>
+  <div class="detail-body" id="detBody" style="max-height:200px">
+    <div class="det-wrap">
+      <canvas id="detCanvas" height="80"></canvas>
+    </div>
+    <div class="axis-row" style="margin-bottom:10px">
+      <span id="detL"></span><span id="detM"></span><span id="detR"></span>
+    </div>
   </div>
 
   <!-- legend -->
-  <div id="legend" class="d-flex flex-wrap gap-2 mb-2" style="font-size:.75rem"></div>
+  <div id="legend" style="margin-bottom:10px"></div>
 
   <!-- controls -->
-  <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-    <div class="btn-group btn-group-sm">
-      <button class="btn btn-outline-secondary" onclick="doZoom(2)">2×</button>
-      <button class="btn btn-outline-secondary" onclick="doZoom(5)">5×</button>
-      <button class="btn btn-outline-secondary" onclick="doZoom(10)">10×</button>
-      <button class="btn btn-outline-secondary" onclick="doZoom(1)">Reset</button>
+  <div style="margin-bottom:10px">
+    <div class="btn-group btn-group-sm" style="margin-right:4px">
+      <button class="btn btn-default" onclick="doZoom(2)">2x</button>
+      <button class="btn btn-default" onclick="doZoom(5)">5x</button>
+      <button class="btn btn-default" onclick="doZoom(10)">10x</button>
+      <button class="btn btn-default" onclick="doZoom(1)">Reset</button>
     </div>
-    <div class="btn-group btn-group-sm">
-      <button class="btn btn-outline-secondary" onclick="doPan(-0.15)">&#9664; Pan</button>
-      <button class="btn btn-outline-secondary" onclick="doPan(0.15)">Pan &#9654;</button>
+    <div class="btn-group btn-group-sm" style="margin-right:4px">
+      <button class="btn btn-default" onclick="doPan(-0.15)">&#9664; Pan</button>
+      <button class="btn btn-default" onclick="doPan(0.15)">Pan &#9654;</button>
     </div>
-    <button class="btn btn-sm btn-outline-danger" onclick="zoomErrors()">Errors only</button>
-
-    <!-- scope toggle — only affects detail canvas, not overview -->
-    <div class="btn-group btn-group-sm scope-group ms-auto">
-      <button class="btn btn-primary" id="btnAll" onclick="setScope('all')">All data</button>
-      <button class="btn btn-outline-primary" id="btnPage" onclick="setScope('page')">This page</button>
+    <button class="btn btn-sm btn-danger" onclick="zoomErrors()" style="margin-right:4px">Errors only</button>
+    <div class="btn-group btn-group-sm pull-right">
+      <button class="btn btn-default btn-scope-on" id="btnAll"  onclick="setScope('all')">All data</button>
+      <button class="btn btn-default"              id="btnPage" onclick="setScope('page')">This page</button>
     </div>
   </div>
 
-  <!-- filter pills + colour-by -->
-  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-    <span class="sec-label">Filter:</span>
+  <!-- filter + colour-by -->
+  <div style="margin-bottom:10px;display:-webkit-box;display:-ms-flexbox;display:flex;
+              -ms-flex-wrap:wrap;flex-wrap:wrap;-webkit-box-align:center;-ms-flex-align:center;align-items:center;gap:6px">
+    <span style="font-size:10px;color:#999;font-weight:600;text-transform:uppercase;letter-spacing:.07em">Filter:</span>
     <div id="pills"></div>
-    <div class="ms-auto d-flex align-items-center gap-1">
-      <label class="sec-label mb-0" for="colorBySel">Colour by</label>
-      <select id="colorBySel" class="form-select form-select-sm" style="width:auto"
+    <div style="margin-left:auto;display:-webkit-box;display:-ms-flexbox;display:flex;
+                -webkit-box-align:center;-ms-flex-align:center;align-items:center;gap:6px">
+      <label style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:.07em;margin:0">Colour by</label>
+      <select id="colorBySel" class="form-control input-sm" style="width:auto"
               onchange="changeColorBy(this.value)"></select>
     </div>
   </div>
 
-  <!-- error banner -->
-  <div id="errBanner" class="alert alert-danger py-1 px-2 d-none" style="font-size:.75rem"></div>
-
-  <!-- tabulator -->
   <div id="tabulator"></div>
-
-</div><!-- /container -->
+</div><!-- /page-wrap -->
 
 <script>
-// ── palette & wave types ──────────────────────────────────────────────────────
-const PAL  = ['#0d6efd','#fd7e14','#dc3545','#198754','#6f42c1','#d63384','#0dcaf0','#ffc107'];
-const WTYPES = ['sine','square','sawtooth','noise','ecg','stepped'];
+// ─────────────────────────────────────────────────────────────────────────────
+// PALETTE & WAVE TYPES
+// ─────────────────────────────────────────────────────────────────────────────
+var PAL    = ['#337ab7','#f0ad4e','#d9534f','#5cb85c','#9b59b6','#e67e22','#1abc9c','#e91e63'];
+var WTYPES = ['sine','square','sawtooth','noise','ecg','stepped'];
 
-// ── state ─────────────────────────────────────────────────────────────────────
-let allData=[], globalMin=0, globalMax=1, globalSpan=1;
-let viewStart=0, viewEnd=1;
-let colorBy='level', activeFilters={}, colorMaps={};
-let table=null, scope='all', pageIds=new Set(), busy=false;
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+var allData=[], globalMin=0, globalMax=1, globalSpan=1;
+// viewStart/viewEnd: the brush selection window as a fraction of globalSpan [0..1]
+var viewStart=0, viewEnd=1;
+// ovStart/ovEnd: the overview visible window as a fraction of globalSpan [0..1]
+// When ovStart=0 and ovEnd=1 the overview shows all time. Scrolling/zooming narrows it.
+var ovStart=0, ovEnd=1;
+var colorBy='level', activeFilters={}, colorMaps={};
+var table=null, scope='all', pageIds={}, busy=false, detailOpen=true;
+// FIX 5: which row is currently focused in the detail view
+var focusedId=null;
+// FIX 1: pixel tolerance for treating a click as a handle-resize vs body-pan
+var HANDLE_PX=16;
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-function showErr(m) {
-  const el=document.getElementById('errBanner');
-  el.textContent='Error: '+m; el.classList.remove('d-none');
+// ─────────────────────────────────────────────────────────────────────────────
+// UTILITIES
+// ─────────────────────────────────────────────────────────────────────────────
+function showErr(m){ var e=document.getElementById('errBanner'); e.style.display='block'; e.textContent='Error: '+m; }
+
+function fmtD(ts){
+  return new Date(ts).toLocaleString('en-GB',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 }
-function fmtD(ts) {
-  return new Date(ts).toLocaleString('en-GB',
-    {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-}
-function fmtS(ms) {
-  if(ms<60000)  return Math.round(ms)+'ms';
-  if(ms<3600000) return Math.round(ms/60000)+'m';
+function fmtS(ms){
+  if(ms<60000)    return Math.round(ms)+'ms';
+  if(ms<3600000)  return Math.round(ms/60000)+'m';
   if(ms<86400000) return (ms/3600000).toFixed(1)+'h';
   return (ms/86400000).toFixed(1)+'d';
 }
-function vPct(ts)  { return Math.max(0,Math.min(1,(ts-globalMin)/globalSpan)); }
-function inView(r) {
-  const vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
+
+// timestamp → global fraction [0..1]
+function gFrac(ts){ return Math.max(0,Math.min(1,(ts-globalMin)/globalSpan)); }
+
+// is row inside the current view window?
+function inView(r){
+  var vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
   return r._te>vs && r._ts<ve;
 }
-function rowColor(r) { return colorMaps[colorBy]?.[String(r[colorBy]??'')] || PAL[0]; }
-function getFiltered() {
-  return Object.keys(activeFilters).length
-    ? allData.filter(r=>activeFilters[String(r[colorBy]??'')]!==false)
-    : allData;
-}
-function getVisible()  { return getFiltered().filter(inView); }
 
-// Detail canvas shows only pageIds when scope==='page'; overview always shows all.
-function getDetailRows() {
-  const base=getFiltered().filter(inView);
-  return (scope==='page' && pageIds.size) ? base.filter(r=>pageIds.has(r.id)) : base;
-}
+function rowColor(r){ return (colorMaps[colorBy]||{})[String(r[colorBy]!=null?r[colorBy]:'')] || PAL[0]; }
 
-// ── seeded RNG ────────────────────────────────────────────────────────────────
-function mkRng(seed) {
-  let s=seed;
-  return () => { s=(s*1664525+1013904223)>>>0; return s/4294967296; };
+function getFiltered(){
+  var keys=Object.keys(activeFilters);
+  if(!keys.length) return allData;
+  return allData.filter(function(r){ return activeFilters[String(r[colorBy]!=null?r[colorBy]:'')] !== false; });
+}
+function getVisible(){ return getFiltered().filter(inView); }
+
+// rows to show in the detail canvas (page-scoped if needed)
+function getScopedRows(){
+  var base=getFiltered().filter(inView);
+  if(scope==='page' && Object.keys(pageIds).length)
+    return base.filter(function(r){ return !!pageIds[r.id]; });
+  return base;
 }
 
-// ── waveform ──────────────────────────────────────────────────────────────────
-function makeWave(seed, color) {
-  const rng=mkRng(seed+1), type=WTYPES[seed%WTYPES.length];
-  const W=400, H=80, mid=H/2, pts=[];
-  if(type==='sine') {
-    const f=1+(seed%4), amp=20+rng()*12, ph=rng()*Math.PI*2;
-    for(let x=0;x<=W;x+=3)
-      pts.push([x, mid-Math.sin(f*2*Math.PI*x/W+ph)*amp
-                   -Math.sin(f*2.7*2*Math.PI*x/W)*amp*.28+(rng()-.5)*2]);
-  } else if(type==='square') {
-    const f=2+(seed%3), amp=18+rng()*10;
-    for(let x=0;x<=W;x+=2) {
-      const v=Math.sin(f*2*Math.PI*x/W)>0?1:-1;
-      pts.push([x, mid-v*amp+(rng()-.5)*3]);
-    }
-  } else if(type==='sawtooth') {
-    const f=2+(seed%4), amp=18+rng()*10;
-    for(let x=0;x<=W;x+=2) {
-      const ph=(x/W*f)%1; pts.push([x, mid-(ph*2-1)*amp+(rng()-.5)*3]);
-    }
-  } else if(type==='noise') {
-    let prev=mid;
-    for(let x=0;x<=W;x+=3) { prev=prev*.65+(mid+(rng()-.5)*46)*.35; pts.push([x,prev]); }
-  } else if(type==='ecg') {
-    for(let x=0;x<=W;x+=2) {
-      const p=(x%90)/90; let y=mid+(rng()-.5)*2;
-      if(p>.25&&p<.3)  y=mid-30;
-      else if(p>.3&&p<.35) y=mid+12;
-      else if(p>.35&&p<.4) y=mid-6;
+// ─────────────────────────────────────────────────────────────────────────────
+// OVERVIEW COORDINATE HELPERS
+// These are the ONLY functions that should map between global fractions and pixels.
+// ─────────────────────────────────────────────────────────────────────────────
+function ovW(){ return document.getElementById('ovCanvas').width || document.getElementById('ovWrap').clientWidth || 900; }
+
+// global fraction → pixel X on overview canvas
+function fracToOvPx(f){ return Math.round((f-ovStart)/(ovEnd-ovStart)*ovW()); }
+
+// mouse event → pixel X on overview canvas (clamped)
+function mouseToOvPx(e){
+  var rc=document.getElementById('ovWrap').getBoundingClientRect();
+  return Math.max(0,Math.min(rc.width, e.clientX-rc.left));
+}
+
+// pixel X on overview canvas → global fraction
+function ovPxToFrac(px){ return ovStart+(px/ovW())*(ovEnd-ovStart); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEEDED RNG
+// ─────────────────────────────────────────────────────────────────────────────
+function mkRng(seed){ var s=seed; return function(){ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WAVEFORM
+// ─────────────────────────────────────────────────────────────────────────────
+function makeWave(seed,color){
+  var rng=mkRng(seed+1), type=WTYPES[seed%WTYPES.length];
+  var W=400,H=80,mid=H/2,pts=[];
+  if(type==='sine'){
+    var f=1+(seed%4),amp=20+rng()*12,ph=rng()*Math.PI*2;
+    for(var x=0;x<=W;x+=3) pts.push([x,mid-Math.sin(f*2*Math.PI*x/W+ph)*amp-Math.sin(f*2.7*2*Math.PI*x/W)*amp*.28+(rng()-.5)*2]);
+  } else if(type==='square'){
+    var f=2+(seed%3),amp=18+rng()*10;
+    for(var x=0;x<=W;x+=2){var v=Math.sin(f*2*Math.PI*x/W)>0?1:-1;pts.push([x,mid-v*amp+(rng()-.5)*3]);}
+  } else if(type==='sawtooth'){
+    var f=2+(seed%4),amp=18+rng()*10;
+    for(var x=0;x<=W;x+=2){var ph=(x/W*f)%1;pts.push([x,mid-(ph*2-1)*amp+(rng()-.5)*3]);}
+  } else if(type==='noise'){
+    var prev=mid;
+    for(var x=0;x<=W;x+=3){prev=prev*.65+(mid+(rng()-.5)*46)*.35;pts.push([x,prev]);}
+  } else if(type==='ecg'){
+    for(var x=0;x<=W;x+=2){
+      var p=(x%90)/90,y=mid+(rng()-.5)*2;
+      if(p>.25&&p<.3)y=mid-30;else if(p>.3&&p<.35)y=mid+12;else if(p>.35&&p<.4)y=mid-6;
       pts.push([x,y]);
     }
-  } else { // stepped
-    const steps=5+(seed%4), amp=15+rng()*10;
-    for(let x=0;x<=W;x+=2) {
-      const st=Math.floor(x/W*steps);
-      pts.push([x, mid-(st%2===0?1:-1)*amp+(rng()-.5)*3]);
-    }
+  } else {
+    var steps=5+(seed%4),amp=15+rng()*10;
+    for(var x=0;x<=W;x+=2){var st=Math.floor(x/W*steps);pts.push([x,mid-(st%2===0?1:-1)*amp+(rng()-.5)*3]);}
   }
-  return {type, pts, color, W, H};
+  return {type:type,pts:pts,color:color,W:W,H:H};
+}
+function waveToSVG(w){
+  var d=w.pts.map(function(p,i){return (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1);}).join(' ');
+  return '<svg viewBox="0 0 '+w.W+' '+w.H+'" preserveAspectRatio="none" width="100%" height="100%"'+
+    ' xmlns="http://www.w3.org/2000/svg"><path d="'+d+'" fill="none" stroke="'+w.color+
+    '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
 
-function waveToSVG(w) {
-  const d=w.pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
-  return `<svg viewBox="0 0 ${w.W} ${w.H}" preserveAspectRatio="none"
-    width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-    <path d="${d}" fill="none" stroke="${w.color}"
-      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`;
-}
-
-// ── demo data ─────────────────────────────────────────────────────────────────
-function buildDemo() {
-  const LEVELS=['INFO','INFO','WARN','ERROR','INFO','WARN'];
-  const CHANS =['ch-1','ch-2','ch-3','ch-4'];
-  const TYPES =['metric','log','trace','alert'];
-  const rng=mkRng(7);
-  const rows=[]; let t=new Date('2024-03-01T08:00:00Z').getTime();
-  for(let i=0;i<150;i++) {
-    const dur=(15+rng()*300)*60000;
-    rows.push({
-      id: i+1,
-      timestamp: new Date(t).toISOString(),
-      end_time:  new Date(t+dur).toISOString(),
-      channel: CHANS[i%4],
-      level:   LEVELS[i%6],
-      type:    TYPES[i%4],
-      label:   'seg-'+String(i+1).padStart(3,'0'),
-      wave:    makeWave(i, PAL[i%PAL.length])
-    });
-    t += dur + (8+rng()*120)*60000;
+// ─────────────────────────────────────────────────────────────────────────────
+// DEMO DATA
+// ─────────────────────────────────────────────────────────────────────────────
+function buildDemo(){
+  var LEVELS=['INFO','INFO','WARN','ERROR','INFO','WARN'];
+  var CHANS=['ch-1','ch-2','ch-3','ch-4'], TYPES=['metric','log','trace','alert'];
+  var rng=mkRng(7),rows=[],t=new Date('2024-03-01T08:00:00Z').getTime();
+  for(var i=0;i<150;i++){
+    var dur=(15+rng()*300)*60000;
+    rows.push({id:i+1,timestamp:new Date(t).toISOString(),end_time:new Date(t+dur).toISOString(),
+      channel:CHANS[i%4],level:LEVELS[i%6],type:TYPES[i%4],
+      label:'seg-'+('00'+(i+1)).slice(-3),wave:makeWave(i,PAL[i%PAL.length])});
+    t+=dur+(8+rng()*120)*60000;
   }
   return rows;
 }
-
-function buildColorMaps(data) {
+function buildColorMaps(data){
   colorMaps={};
-  const skip=['_ts','_te','wave','timestamp','end_time','id'];
-  Object.keys(data[0]).filter(k=>!skip.includes(k)).forEach(col=>{
-    const vals=[...new Set(data.map(r=>String(r[col]??'')))].sort();
-    const m={}; vals.forEach((v,i)=>m[v]=PAL[i%PAL.length]);
-    colorMaps[col]=m;
+  var skip={'_ts':1,'_te':1,'wave':1,'timestamp':1,'end_time':1,'id':1};
+  Object.keys(data[0]).filter(function(k){return !skip[k];}).forEach(function(col){
+    var vals=[],seen={};
+    data.forEach(function(r){var v=String(r[col]!=null?r[col]:'');if(!seen[v]){seen[v]=1;vals.push(v);}});
+    vals.sort();
+    var m={};vals.forEach(function(v,i){m[v]=PAL[i%PAL.length];});colorMaps[col]=m;
   });
 }
 
-// ── tabulator ─────────────────────────────────────────────────────────────────
-function snapshotPage() {
+// ─────────────────────────────────────────────────────────────────────────────
+// COLLAPSIBLE DETAIL
+// ─────────────────────────────────────────────────────────────────────────────
+function toggleDetail(){
+  detailOpen=!detailOpen;
+  document.getElementById('detBody').style.maxHeight=detailOpen?'200px':'0';
+  document.getElementById('detCaret').innerHTML=detailOpen?'&#9660;':'&#9654;';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TABULATOR
+// ─────────────────────────────────────────────────────────────────────────────
+function snapshotPage(){
   if(!table) return;
-  try {
-    const active=table.getData('active');
-    const ps=table.getPageSize(), pg=table.getPage();
-    const sl=active.slice((pg-1)*ps, pg*ps);
-    pageIds=new Set(sl.map(r=>r.id));
+  try{
+    var active=table.getData('active');
+    var ps=table.getPageSize(),pg=table.getPage();
+    var sl=active.slice((pg-1)*ps,pg*ps);
+    pageIds={};sl.forEach(function(r){pageIds[r.id]=1;});
     document.getElementById('stPage').textContent=sl.length;
-  } catch(e) { pageIds=new Set(); }
+  }catch(e){pageIds={};}
 }
 
-function levelBadge(v) {
-  const map={'ERROR':'danger','WARN':'warning','INFO':'secondary'};
-  const cls=map[v]||'secondary';
-  return `<span class="badge text-bg-${cls}" style="font-size:.68rem">${v}</span>`;
+function levelBadge(v){
+  var m={'ERROR':'danger','WARN':'warning','INFO':'default'};
+  return '<span class="label label-'+(m[v]||'default')+'" style="font-size:10px">'+v+'</span>';
 }
 
-function initTable(data) {
-  if(typeof Tabulator==='undefined') { showErr('Tabulator failed to load'); return; }
-  table=new Tabulator('#tabulator', {
-    data,
-    height: '480px',
-    layout: 'fitColumns',
-    pagination: 'local',
-    paginationSize: 25,
-    paginationSizeSelector: [10,25,50,100],
-    columns: [
-      {title:'#',      field:'id',      width:50, hozAlign:'right'},
-      {title:'Signal', width:110, formatter: cell=>{
-        const w=cell.getRow().getData().wave;
-        return w?`<div style="height:30px">${waveToSVG(w)}</div>`:'';
+// FIX 5: apply focused-row highlight after table data settles
+function applyFocusHighlight(){
+  if(!table||!focusedId) return;
+  try{
+    table.getRows().forEach(function(r){r.getElement().classList.remove('row-focused');});
+    var found=table.getRows().filter(function(r){return r.getData().id===focusedId;});
+    if(found.length) found[0].getElement().classList.add('row-focused');
+  }catch(ex){}
+}
+
+function initTable(data){
+  if(typeof Tabulator==='undefined'){showErr('Tabulator failed to load');return;}
+  table=new Tabulator('#tabulator',{
+    data:data,height:'460px',layout:'fitColumns',
+    pagination:'local',paginationSize:25,paginationSizeSelector:[10,25,50,100],
+    columns:[
+      {title:'#',      field:'id',        width:50,hozAlign:'right'},
+      {title:'Signal', width:110,formatter:function(cell){
+        var w=cell.getRow().getData().wave;
+        return w?'<div style="height:28px">'+waveToSVG(w)+'</div>':'';
       }},
-      {title:'Level',  field:'level',   width:80, formatter: cell=>levelBadge(cell.getValue())},
-      {title:'Channel',field:'channel', width:90},
-      {title:'Type',   field:'type',    width:76},
-      {title:'Label',  field:'label',   width:90},
-      {title:'Start',  field:'timestamp',width:130,
-        formatter: cell=>fmtD(new Date(cell.getValue()).getTime())},
-      {title:'Dur',    width:60,
-        formatter: cell=>{ const r=cell.getRow().getData(); return fmtS(r._te-r._ts); }},
-      {title:'Position in view', formatter: cell=>{
-        const r=cell.getRow().getData();
-        const vs=globalMin+viewStart*globalSpan,
-              ve=globalMin+viewEnd*globalSpan, sp=ve-vs||1;
-        const l=((Math.max(r._ts,vs)-vs)/sp*100).toFixed(1);
-        const w=Math.max(0.3,(Math.min(r._te,ve)-Math.max(r._ts,vs))/sp*100).toFixed(1);
-        const c=rowColor(r);
-        return `<div style="height:10px;background:#e9ecef;border-radius:2px;overflow:hidden;position:relative;margin:3px 0">
-          <div style="position:absolute;left:${l}%;width:${w}%;height:100%;background:${c}"></div></div>`;
+      {title:'Level',  field:'level',     width:78,formatter:function(cell){return levelBadge(cell.getValue());}},
+      {title:'Channel',field:'channel',   width:88},
+      {title:'Type',   field:'type',      width:74},
+      {title:'Label',  field:'label',     width:90},
+      {title:'Start',  field:'timestamp', width:128,formatter:function(cell){return fmtD(new Date(cell.getValue()).getTime());}},
+      {title:'Dur',    width:58,formatter:function(cell){var r=cell.getRow().getData();return fmtS(r._te-r._ts);}},
+      {title:'In view',formatter:function(cell){
+        var r=cell.getRow().getData();
+        var vs=globalMin+viewStart*globalSpan,ve=globalMin+viewEnd*globalSpan,sp=ve-vs||1;
+        var l=((Math.max(r._ts,vs)-vs)/sp*100).toFixed(1);
+        var w=Math.max(0.3,(Math.min(r._te,ve)-Math.max(r._ts,vs))/sp*100).toFixed(1);
+        return '<div style="height:10px;background:#eee;border-radius:2px;overflow:hidden;position:relative;margin:3px 0">'+
+               '<div style="position:absolute;left:'+l+'%;width:'+w+'%;height:100%;background:'+rowColor(r)+'"></div></div>';
       }}
     ],
-    rowClick(e, row) {
-      const el=row.getElement();
-      const ex=el.querySelector('.exp-box');
-      if(ex) { ex.remove(); return; }
-      const d=row.getData(), c=rowColor(d), w=d.wave;
-      const vs=globalMin+viewStart*globalSpan,
-            ve=globalMin+viewEnd*globalSpan, sp=ve-vs||1;
-      const l =((Math.max(d._ts,vs)-vs)/sp*100).toFixed(2);
-      const ww=Math.max(0.3,(Math.min(d._te,ve)-Math.max(d._ts,vs))/sp*100).toFixed(2);
-      const box=document.createElement('div'); box.className='exp-box';
-      box.innerHTML=`
-        <div class="exp-tl">
-          <div style="position:absolute;top:0;left:${l}%;width:${ww}%;height:100%;
-               border-left:2px solid ${c};background:${c}14">
-            ${w?waveToSVG(w):''}
-          </div>
-        </div>
-        <div class="d-flex flex-wrap gap-3 text-muted">
-          <span><strong>Type</strong> ${w?.type||'—'}</span>
-          <span><strong>Start</strong> ${fmtD(d._ts)}</span>
-          <span><strong>End</strong> ${fmtD(d._te)}</span>
-          <span><strong>Duration</strong> ${fmtS(d._te-d._ts)}</span>
-        </div>`;
-      el.appendChild(box);
+    // FIX 5: clicking a row zooms detail to that segment and highlights it
+    rowClick:function(e,row){
+      var d=row.getData();
+      focusedId=d.id;
+      // zoom view window around this row with 30% padding
+      var pad=(d._te-d._ts)*0.3;
+      viewStart=Math.max(0,(d._ts-pad-globalMin)/globalSpan);
+      viewEnd  =Math.min(1,(d._te+pad-globalMin)/globalSpan);
+      // ensure overview window contains the brush
+      var mid=(viewStart+viewEnd)/2, ow=ovEnd-ovStart;
+      if(mid<ovStart||mid>ovEnd){
+        ovStart=Math.max(0,mid-ow/2);
+        ovEnd=Math.min(1,ovStart+ow);
+        if(ovEnd>1){ovEnd=1;ovStart=Math.max(0,1-ow);}
+      }
+      // open detail if collapsed
+      if(!detailOpen) toggleDetail();
+      // refresh canvases immediately (fast path — no table reload needed)
+      redraw();
+      // now reload table so "in view" bar updates, then re-apply highlight
+      if(!busy){
+        busy=true;
+        table.setData(getVisible()).then(function(){
+          busy=false;
+          snapshotPage();
+          redraw();
+          applyFocusHighlight();
+        }).catch(function(ex){busy=false;});
+      }
     },
-    pageLoaded() {
+    pageLoaded:function(){
       snapshotPage();
-      // scope=page: only redraw detail, NOT overview (overview always = all data)
-      if(scope==='page') drawDetail();
+      applyFocusHighlight();
+      if(scope==='page') redraw();
     }
   });
 }
 
-// ── pills / legend ────────────────────────────────────────────────────────────
-function buildPills() {
-  const map=colorMaps[colorBy], vals=Object.keys(map||{});
-  if(!vals.length) {
-    document.getElementById('pills').innerHTML='';
-    document.getElementById('legend').innerHTML=''; return;
-  }
-  if(!Object.keys(activeFilters).length) vals.forEach(v=>activeFilters[v]=true);
-  document.getElementById('pills').innerHTML=
-    vals.map(v=>`<div class="pill${activeFilters[v]?' on':''}" onclick="toggleFilter('${v}')">
-      <span class="dot" style="background:${map[v]}"></span>${v}</div>`).join('');
-  document.getElementById('legend').innerHTML=
-    `<span class="text-muted">Colour: <strong>${colorBy}</strong></span>` +
-    vals.map(v=>`<span class="d-flex align-items-center gap-1">
-      <span class="dot" style="background:${map[v]}"></span>${v}</span>`).join('');
+// ─────────────────────────────────────────────────────────────────────────────
+// PILLS / LEGEND
+// ─────────────────────────────────────────────────────────────────────────────
+function buildPills(){
+  var map=colorMaps[colorBy]||{},vals=Object.keys(map);
+  if(!vals.length){document.getElementById('pills').innerHTML='';document.getElementById('legend').innerHTML='';return;}
+  if(!Object.keys(activeFilters).length) vals.forEach(function(v){activeFilters[v]=true;});
+  document.getElementById('pills').innerHTML=vals.map(function(v){
+    return '<div class="pill'+(activeFilters[v]?' on':'')+'" onclick="toggleFilter(\''+v+'\')">'+
+           '<span class="dot" style="background:'+map[v]+'"></span>'+v+'</div>';
+  }).join('');
+  document.getElementById('legend').innerHTML='<span class="text-muted">Colour: <strong>'+colorBy+'</strong>&nbsp;</span>'+
+    vals.map(function(v){
+      return '<span class="leg-item"><span style="background:'+map[v]+';display:inline-block;'+
+             'width:8px;height:8px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>'+v+'</span>';
+    }).join('');
 }
-function toggleFilter(v) { activeFilters[v]=!activeFilters[v]; buildPills(); refreshTable(); }
-function changeColorBy(v) { colorBy=v; activeFilters={}; buildPills(); refreshTable(); }
+function toggleFilter(v){activeFilters[v]=!activeFilters[v];buildPills();refreshTable();}
+function changeColorBy(v){colorBy=v;activeFilters={};buildPills();refreshTable();}
 
-// ── scope toggle ──────────────────────────────────────────────────────────────
-// NOTE: toggling scope only redraws the detail canvas; overview is unaffected.
-function setScope(s) {
+// ─────────────────────────────────────────────────────────────────────────────
+// SCOPE TOGGLE
+// FIX 4: "All data" resets the view to the full time range AND reloads table
+// with all filtered rows (not just the currently-in-view subset).
+// ─────────────────────────────────────────────────────────────────────────────
+function setScope(s){
   scope=s;
-  document.getElementById('btnAll').className =
-    'btn btn-sm ' + (s==='all' ? 'btn-primary' : 'btn-outline-primary');
-  document.getElementById('btnPage').className =
-    'btn btn-sm ' + (s==='page' ? 'btn-primary' : 'btn-outline-primary');
-  drawDetail(); // overview intentionally NOT redrawn here
+  document.getElementById('btnAll').className ='btn btn-default btn-sm'+(s==='all'?' btn-scope-on':'');
+  document.getElementById('btnPage').className='btn btn-default btn-sm'+(s==='page'?' btn-scope-on':'');
+  if(s==='all'){
+    // reset both the view window and the overview window to full range
+    viewStart=0; viewEnd=1;
+    ovStart=0;   ovEnd=1;
+    focusedId=null;
+    redraw(); // draw immediately so canvases update
+    if(busy||!table) return;
+    busy=true;
+    // load ALL filtered rows (not just inView, which would be the same as all when viewStart=0,viewEnd=1 anyway)
+    table.setData(getFiltered()).then(function(){busy=false;snapshotPage();redraw();}).catch(function(e){busy=false;showErr(String(e));});
+  } else {
+    redraw();
+  }
 }
 
-// ── canvas: overview (always all data) ───────────────────────────────────────
-function drawOverview() {
-  const cv=document.getElementById('ovCanvas');
-  const W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=64;
-  const ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,64);
-  const filtered=getFiltered();
-  const th=Math.max(1.2,(64-10)/allData.length);
-  allData.forEach((r,i)=>{
-    const x1=Math.round(vPct(r._ts)*W),
-          x2=Math.max(x1+2,Math.round(vPct(r._te)*W));
-    ctx.fillStyle=filtered.includes(r)?rowColor(r)+'88':'#ced4da';
-    ctx.fillRect(x1, 5+i*th, x2-x1, Math.max(1,th-.4));
+// ─────────────────────────────────────────────────────────────────────────────
+// SELECTION INFO BAR + BRUSH TOOLTIP
+// ─────────────────────────────────────────────────────────────────────────────
+function updateSelectionInfo(){
+  var vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
+  document.getElementById('selFrom').textContent=fmtD(vs);
+  document.getElementById('selTo').textContent  =fmtD(ve);
+  document.getElementById('selSpan').textContent=fmtS(ve-vs);
+  document.getElementById('brushTip').textContent=fmtD(vs)+' \u2192 '+fmtD(ve)+' ('+fmtS(ve-vs)+')';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLE DRAWING
+// ─────────────────────────────────────────────────────────────────────────────
+function rrect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+function drawHandle(ctx,cx,cy){
+  var HW=11,HH=22,R=4;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.2)';ctx.shadowBlur=4;
+  ctx.fillStyle='#fff';rrect(ctx,cx-HW/2,cy-HH/2,HW,HH,R);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='#337ab7';ctx.lineWidth=1.5;rrect(ctx,cx-HW/2,cy-HH/2,HW,HH,R);ctx.stroke();
+  ctx.strokeStyle='#aaa';ctx.lineWidth=1;
+  [-4,0,4].forEach(function(dy){ctx.beginPath();ctx.moveTo(cx-3,cy+dy);ctx.lineTo(cx+3,cy+dy);ctx.stroke();});
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OVERVIEW CANVAS
+// FIX 2: rows drawn as true horizontal bands — Y computed with Math.round(i * slotH)
+// so there is zero floating-point drift across 150 rows.
+// The overview can scroll (ovStart/ovEnd) to show any portion of the full time range.
+// ─────────────────────────────────────────────────────────────────────────────
+function drawOverview(){
+  var cv=document.getElementById('ovCanvas');
+  var W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=80;
+  var ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,80);
+
+  var DTOP=4, DBOT=58, DH=DBOT-DTOP; // pixel band for data rows
+  var n=allData.length;
+  // slotH = exact floating slot height per row; we round per-row to get pixel Y.
+  // This means each row's Y is independent — no accumulation of error.
+  var slotH=DH/n;
+  // visual bar height: at least 1px, capped at 4px so dense data stays readable
+  var barH=Math.max(1,Math.min(4,Math.floor(slotH)));
+
+  var filtered=getFiltered(), filteredSet={}, scopedSet={};
+  filtered.forEach(function(r){filteredSet[r.id]=1;});
+  if(scope==='page'&&Object.keys(pageIds).length){
+    filtered.forEach(function(r){if(pageIds[r.id])scopedSet[r.id]=1;});
+  } else {
+    filtered.forEach(function(r){scopedSet[r.id]=1;});
+  }
+
+  allData.forEach(function(r,i){
+    var f1=gFrac(r._ts), f2=gFrac(r._te);
+    // skip rows entirely outside the overview viewport
+    if(f2<ovStart||f1>ovEnd) return;
+    var x1=Math.max(0,fracToOvPx(f1));
+    var x2=Math.min(W,fracToOvPx(f2));
+    if(x2<x1+2) x2=x1+2; // minimum 2px width so every row is visible
+    // FIX 2: independent Y per row — no accumulation
+    var y=DTOP+Math.round(i*slotH);
+    if(y+barH>DBOT) return;
+    if(scopedSet[r.id])        ctx.fillStyle=rowColor(r)+'cc';
+    else if(filteredSet[r.id]) ctx.fillStyle=rowColor(r)+'40';
+    else                       ctx.fillStyle='#ccc';
+    ctx.fillRect(x1,y,x2-x1,barH);
   });
-  const bx1=Math.round(viewStart*W), bx2=Math.round(viewEnd*W);
-  const br=document.getElementById('brush');
-  br.style.left=bx1+'px'; br.style.width=Math.max(8,bx2-bx1)+'px';
+
+  // brush selection overlay
+  var bx1=Math.max(0,fracToOvPx(viewStart));
+  var bx2=Math.min(W,fracToOvPx(viewEnd));
+  ctx.fillStyle='rgba(51,122,183,0.10)';
+  ctx.fillRect(bx1,0,bx2-bx1,80);
+  // brush edge lines
+  ctx.strokeStyle='#337ab7';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(bx1,0);ctx.lineTo(bx1,80);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(bx2,0);ctx.lineTo(bx2,80);ctx.stroke();
+  // FIX 1: grab handles drawn on canvas at each brush edge
+  drawHandle(ctx,bx1,40);
+  drawHandle(ctx,bx2,40);
+
+  // keep the invisible #brush div aligned for tooltip positioning
+  var br=document.getElementById('brush');
+  br.style.left=bx1+'px';br.style.width=Math.max(8,bx2-bx1)+'px';
+  br.style.top='0';br.style.height='80px';
 }
 
-// ── canvas: detail (respects scope) ──────────────────────────────────────────
-function drawDetail() {
-  const cv=document.getElementById('detCanvas');
-  const W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=80;
-  const ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,80);
-  const vs=globalMin+viewStart*globalSpan,
-        ve=globalMin+viewEnd*globalSpan, sp=ve-vs||1;
-  const toX=ts=>Math.round((ts-vs)/sp*W);
-
-  // faint gridlines at quarter marks
-  ctx.strokeStyle='#dee2e6'; ctx.lineWidth=1;
-  [1,2,3].forEach(i=>{ ctx.beginPath(); ctx.moveTo(W/4*i,0); ctx.lineTo(W/4*i,80); ctx.stroke(); });
-
-  const rows=getDetailRows(); // honours scope
-  rows.forEach(r=>{
+// ─────────────────────────────────────────────────────────────────────────────
+// DETAIL CANVAS
+// ─────────────────────────────────────────────────────────────────────────────
+function drawDetail(){
+  var cv=document.getElementById('detCanvas');
+  var W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=80;
+  var ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,80);
+  var vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan, sp=ve-vs||1;
+  function toX(ts){return Math.round((ts-vs)/sp*W);}
+  // subtle grid
+  ctx.strokeStyle='#ececec';ctx.lineWidth=1;
+  [1,2,3].forEach(function(i){ctx.beginPath();ctx.moveTo(W/4*i,0);ctx.lineTo(W/4*i,80);ctx.stroke();});
+  getScopedRows().forEach(function(r){
     if(!inView(r)) return;
-    const x1=Math.max(0,toX(r._ts)),
-          x2=Math.min(W,Math.max(x1+4,toX(r._te)));
-    const c=rowColor(r), seg=x2-x1;
-    ctx.fillStyle=c+'22'; ctx.fillRect(x1,4,seg,72);
-    ctx.fillStyle=c+'cc'; ctx.fillRect(x1,4,2,72);
-    // inline waveform
-    if(r.wave && seg>12) {
-      ctx.save(); ctx.beginPath(); ctx.rect(x1,4,seg,72); ctx.clip();
-      ctx.strokeStyle=c+'bb'; ctx.lineWidth=1.2; ctx.beginPath();
-      r.wave.pts.forEach(([px,py],i)=>{
-        const nx=x1+px/r.wave.W*seg, ny=4+py/r.wave.H*72;
-        i===0?ctx.moveTo(nx,ny):ctx.lineTo(nx,ny);
+    var x1=Math.max(0,toX(r._ts)), x2=Math.min(W,Math.max(x1+4,toX(r._te)));
+    var c=rowColor(r), seg=x2-x1;
+    ctx.fillStyle=c+'22';ctx.fillRect(x1,4,seg,72);
+    ctx.fillStyle=c+'cc';ctx.fillRect(x1,4,2,72);
+    if(r.wave&&seg>12){
+      ctx.save();ctx.beginPath();ctx.rect(x1,4,seg,72);ctx.clip();
+      ctx.strokeStyle=c+'bb';ctx.lineWidth=1.2;ctx.beginPath();
+      r.wave.pts.forEach(function(p,ii){
+        var nx=x1+p[0]/r.wave.W*seg, ny=4+p[1]/r.wave.H*72;
+        ii===0?ctx.moveTo(nx,ny):ctx.lineTo(nx,ny);
       });
-      ctx.stroke(); ctx.restore();
+      ctx.stroke();ctx.restore();
+    }
+    // FIX 5: amber focus ring around the currently-focused row
+    if(r.id===focusedId){
+      ctx.save();
+      ctx.strokeStyle='#f0ad4e';ctx.lineWidth=2.5;
+      ctx.strokeRect(x1+1,5,x2-x1-2,70);
+      ctx.restore();
     }
   });
 }
 
-// ── axis labels (detail tracks zoom window) ───────────────────────────────────
-function updateAxisLabels() {
-  const vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
-  document.getElementById('ovL').textContent=fmtD(globalMin);
-  document.getElementById('ovM').textContent=fmtD((globalMin+globalMax)/2);
-  document.getElementById('ovR').textContent=fmtD(globalMax);
+// ─────────────────────────────────────────────────────────────────────────────
+// AXIS LABELS + STATS
+// ─────────────────────────────────────────────────────────────────────────────
+function updateAxisLabels(){
+  var vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
+  var ots=globalMin+ovStart*globalSpan,  ote=globalMin+ovEnd*globalSpan;
+  document.getElementById('ovL').textContent=fmtD(ots);
+  document.getElementById('ovM').textContent=fmtD((ots+ote)/2);
+  document.getElementById('ovR').textContent=fmtD(ote);
   document.getElementById('detL').textContent=fmtD(vs);
   document.getElementById('detM').textContent=fmtD((vs+ve)/2);
   document.getElementById('detR').textContent=fmtD(ve);
 }
-
-function updateStats() {
+function updateStats(){
   document.getElementById('stTotal').textContent=allData.length;
   document.getElementById('stVis').textContent=getVisible().length;
-  document.getElementById('stZoom').textContent=(1/(viewEnd-viewStart||.001)).toFixed(1)+'×';
+  document.getElementById('stZoom').textContent=(1/(viewEnd-viewStart||.001)).toFixed(1)+'x';
+}
+function redraw(){
+  drawOverview();
+  drawDetail();
+  updateAxisLabels();
+  updateStats();
+  updateSelectionInfo();
 }
 
-// full redraw (canvases + labels + stats — does NOT touch table)
-function redraw() { drawOverview(); drawDetail(); updateAxisLabels(); updateStats(); }
-
-// ── table refresh (guarded against re-entrancy) ───────────────────────────────
-function refreshTable() {
+// ─────────────────────────────────────────────────────────────────────────────
+// TABLE REFRESH
+// ─────────────────────────────────────────────────────────────────────────────
+function refreshTable(){
   if(busy||!table) return;
   busy=true;
-  table.setData(getVisible())
-    .then(()=>{ busy=false; snapshotPage(); redraw(); })
-    .catch(e=>{ busy=false; showErr(String(e)); });
+  table.setData(getVisible()).then(function(){
+    busy=false;snapshotPage();redraw();applyFocusHighlight();
+  }).catch(function(e){busy=false;showErr(String(e));});
+}
+function updateAll(){redraw();refreshTable();}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BRUSH MOUSE INTERACTION
+//
+// FIX 1: resize mode is ONLY triggered when the mouse is within HANDLE_PX pixels
+// of a brush edge line.  Anywhere else inside the brush body → pan mode.
+// The cursor changes on hover to telegraph the mode to the user.
+//
+// FIX 3: when the mouse (during a drag) is within 5% of either edge of the
+// overview canvas, the overview viewport (ovStart/ovEnd) scrolls automatically,
+// allowing the brush to be dragged all the way to the full data extents.
+// ─────────────────────────────────────────────────────────────────────────────
+var bActive=false, bMode=null, bAnchorFrac=0, bsSnap=0, beSnap=0;
+var edgeRAF=null;
+var EDGE_ZONE=0.05, SCROLL_SPD=0.006;
+var ovWrapEl=document.getElementById('ovWrap');
+
+function stopEdgeScroll(){if(edgeRAF){cancelAnimationFrame(edgeRAF);edgeRAF=null;}}
+function startEdgeScroll(dir){
+  stopEdgeScroll();
+  function step(){
+    var ow=ovEnd-ovStart;
+    ovStart=Math.max(0,Math.min(1-ow,ovStart+dir*SCROLL_SPD));
+    ovEnd=ovStart+ow;
+    redraw();
+    edgeRAF=requestAnimationFrame(step);
+  }
+  edgeRAF=requestAnimationFrame(step);
 }
 
-function updateAll() { redraw(); refreshTable(); }
-
-// ── brush interaction ─────────────────────────────────────────────────────────
-let bActive=false, bMode=null, bAnchor=0, bsSnap=0, beSnap=0;
-const ovWrap=document.getElementById('ovWrap');
-
-function ovPct(e) {
-  const r=ovWrap.getBoundingClientRect();
-  return Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
-}
-ovWrap.addEventListener('mousedown',e=>{
-  const p=ovPct(e), tol=.018;
-  if(Math.abs(p-viewStart)<tol)       bMode='L';
-  else if(Math.abs(p-viewEnd)<tol)    bMode='R';
-  else if(p>viewStart&&p<viewEnd)     { bMode='M'; bAnchor=p; bsSnap=viewStart; beSnap=viewEnd; }
-  else                                { bMode='N'; bAnchor=p; viewStart=p; viewEnd=p+.001; }
-  bActive=true; e.preventDefault();
+// live cursor update on hover (no drag active)
+ovWrapEl.addEventListener('mousemove',function(e){
+  if(bActive) return;
+  var px=mouseToOvPx(e);
+  var bx1=fracToOvPx(viewStart), bx2=fracToOvPx(viewEnd);
+  var gf=ovPxToFrac(px);
+  if(Math.abs(px-bx1)<HANDLE_PX||Math.abs(px-bx2)<HANDLE_PX){
+    ovWrapEl.className='cur-ew';      // near a handle → resize cursor
+  } else if(gf>viewStart&&gf<viewEnd){
+    ovWrapEl.className='cur-grab';    // inside brush body → pan cursor
+  } else {
+    ovWrapEl.className='';            // outside → default crosshair from CSS
+  }
 });
-window.addEventListener('mousemove',e=>{
+ovWrapEl.addEventListener('mouseleave',function(){if(!bActive)ovWrapEl.className='';});
+
+ovWrapEl.addEventListener('mousedown',function(e){
+  var px=mouseToOvPx(e);
+  var gf=ovPxToFrac(px);
+  var bx1=fracToOvPx(viewStart), bx2=fracToOvPx(viewEnd);
+
+  // FIX 1: pixel-precise hit detection for handles
+  if(Math.abs(px-bx1)<HANDLE_PX){
+    bMode='L';                           // resize left edge
+  } else if(Math.abs(px-bx2)<HANDLE_PX){
+    bMode='R';                           // resize right edge
+  } else if(gf>viewStart&&gf<viewEnd){
+    bMode='M'; bAnchorFrac=gf; bsSnap=viewStart; beSnap=viewEnd;  // pan whole brush
+  } else {
+    bMode='N'; bAnchorFrac=gf; viewStart=gf; viewEnd=gf+.001;     // draw new selection
+  }
+  bActive=true;
+  ovWrapEl.className=(bMode==='L'||bMode==='R')?'cur-ew':'cur-grabbing';
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove',function(e){
   if(!bActive) return;
-  const p=ovPct(e), w=viewEnd-viewStart;
-  if(bMode==='L')      viewStart=Math.max(0,Math.min(viewEnd-.005,p));
-  else if(bMode==='R') viewEnd=Math.min(1,Math.max(viewStart+.005,p));
-  else if(bMode==='M') { const d=p-bAnchor; viewStart=Math.max(0,Math.min(1-w,bsSnap+d)); viewEnd=viewStart+w; }
-  else                 { viewStart=Math.min(bAnchor,p); viewEnd=Math.max(bAnchor,p)+.001; }
-  redraw(); // fast mid-drag: canvases only
-});
-window.addEventListener('mouseup',()=>{ if(bActive){ bActive=false; updateAll(); } });
+  var px=mouseToOvPx(e);
+  var gf=ovPxToFrac(px);
+  var w=viewEnd-viewStart;
 
-// click detail canvas to zoom into a segment
-document.getElementById('detCanvas').addEventListener('click',e=>{
-  const cv=document.getElementById('detCanvas'), rc=cv.getBoundingClientRect();
-  const ts=(globalMin+viewStart*globalSpan)
-          +((e.clientX-rc.left)/rc.width)*(viewEnd-viewStart)*globalSpan;
-  const hit=getVisible().filter(r=>r._ts<=ts&&r._te>=ts);
-  if(hit.length) {
-    const s=hit[0], pad=(s._te-s._ts)*.2;
+  if(bMode==='L')      viewStart=Math.max(0,Math.min(viewEnd-.005,gf));
+  else if(bMode==='R') viewEnd  =Math.min(1,Math.max(viewStart+.005,gf));
+  else if(bMode==='M'){var d=gf-bAnchorFrac;viewStart=Math.max(0,Math.min(1-w,bsSnap+d));viewEnd=viewStart+w;}
+  else                {viewStart=Math.min(bAnchorFrac,gf);viewEnd=Math.max(bAnchorFrac,gf)+.001;}
+
+  // FIX 3: raw canvas fraction for edge-scroll detection
+  var rawPct=px/ovW();
+  if(rawPct<EDGE_ZONE&&ovStart>0)        startEdgeScroll(-1);
+  else if(rawPct>(1-EDGE_ZONE)&&ovEnd<1) startEdgeScroll(1);
+  else                                   stopEdgeScroll();
+
+  redraw(); // fast canvas-only update while dragging
+});
+
+document.addEventListener('mouseup',function(){
+  if(bActive){
+    bActive=false;
+    stopEdgeScroll();
+    ovWrapEl.className='';
+    updateAll(); // reload table on release
+  }
+});
+
+// FIX 3: scroll wheel zooms the overview viewport around the cursor
+ovWrapEl.addEventListener('wheel',function(e){
+  e.preventDefault();
+  var px=mouseToOvPx(e);
+  var pivot=ovPxToFrac(px);
+  var factor=e.deltaY>0?1.3:0.77;
+  var ow=ovEnd-ovStart, nw=Math.min(1,Math.max(0.02,ow*factor));
+  var ratio=(pivot-ovStart)/ow;
+  ovStart=Math.max(0,pivot-ratio*nw);
+  ovEnd=Math.min(1,ovStart+nw);
+  if(ovEnd>1){ovEnd=1;ovStart=Math.max(0,1-nw);}
+  redraw();
+},{passive:false});
+
+// click detail canvas → zoom into that segment
+document.getElementById('detCanvas').addEventListener('click',function(e){
+  var cv=document.getElementById('detCanvas'),rc=cv.getBoundingClientRect();
+  var ts=(globalMin+viewStart*globalSpan)+((e.clientX-rc.left)/rc.width)*(viewEnd-viewStart)*globalSpan;
+  var hit=getVisible().filter(function(r){return r._ts<=ts&&r._te>=ts;});
+  if(hit.length){
+    var s=hit[0],pad=(s._te-s._ts)*.2;
     viewStart=Math.max(0,(s._ts-pad-globalMin)/globalSpan);
     viewEnd  =Math.min(1,(s._te+pad-globalMin)/globalSpan);
+    focusedId=s.id;
     updateAll();
   }
 });
 
-// ── zoom / pan ────────────────────────────────────────────────────────────────
-function doZoom(f) {
-  const m=(viewStart+viewEnd)/2, h=(1/f)/2;
-  viewStart=Math.max(0,m-h); viewEnd=Math.min(1,m+h); updateAll();
-}
-function doPan(d) {
-  const w=viewEnd-viewStart;
-  viewStart=Math.max(0,Math.min(1-w,viewStart+d)); viewEnd=viewStart+w; updateAll();
-}
-function zoomErrors() {
-  const errs=getFiltered().filter(r=>/ERROR|CRIT|FATAL/i.test(r.level||''));
-  if(!errs.length) { alert('No errors in current filter'); return; }
-  const pad=globalSpan*.04;
-  viewStart=Math.max(0,(Math.min(...errs.map(r=>r._ts))-pad-globalMin)/globalSpan);
-  viewEnd  =Math.min(1,(Math.max(...errs.map(r=>r._te))+pad-globalMin)/globalSpan);
+function doZoom(f){var m=(viewStart+viewEnd)/2,h=(1/f)/2;viewStart=Math.max(0,m-h);viewEnd=Math.min(1,m+h);updateAll();}
+function doPan(d){var w=viewEnd-viewStart;viewStart=Math.max(0,Math.min(1-w,viewStart+d));viewEnd=viewStart+w;updateAll();}
+function zoomErrors(){
+  var errs=getFiltered().filter(function(r){return /ERROR|CRIT|FATAL/i.test(r.level||'');});
+  if(!errs.length){alert('No errors in current filter');return;}
+  var pad=globalSpan*.04;
+  viewStart=Math.max(0,(Math.min.apply(null,errs.map(function(r){return r._ts;}))-pad-globalMin)/globalSpan);
+  viewEnd  =Math.min(1,(Math.max.apply(null,errs.map(function(r){return r._te;}))+pad-globalMin)/globalSpan);
   updateAll();
 }
 
-// ── init ──────────────────────────────────────────────────────────────────────
-function init() {
-  try {
-    const raw=buildDemo();
-    allData=raw
-      .map(r=>({...r, _ts:new Date(r.timestamp).getTime(), _te:new Date(r.end_time).getTime()}))
-      .sort((a,b)=>a._ts-b._ts);
+// ─────────────────────────────────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────────────────────────────────
+function init(){
+  try{
+    var raw=buildDemo();
+    allData=raw.map(function(r){
+      return Object.assign({},r,{_ts:new Date(r.timestamp).getTime(),_te:new Date(r.end_time).getTime()});
+    }).sort(function(a,b){return a._ts-b._ts;});
     globalMin=allData[0]._ts;
-    globalMax=Math.max(...allData.map(r=>r._te));
+    globalMax=Math.max.apply(null,allData.map(function(r){return r._te;}));
     globalSpan=globalMax-globalMin||1;
+    ovStart=0; ovEnd=1;
 
     buildColorMaps(allData);
-    const cats=Object.keys(colorMaps);
-    colorBy=cats.includes('level')?'level':cats[0]||'';
-
-    const sel=document.getElementById('colorBySel');
-    cats.forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; sel.appendChild(o); });
+    var cats=Object.keys(colorMaps);
+    colorBy=cats.indexOf('level')>=0?'level':(cats[0]||'');
+    var sel=document.getElementById('colorBySel');
+    cats.forEach(function(c){var o=document.createElement('option');o.value=c;o.textContent=c;sel.appendChild(o);});
     sel.value=colorBy;
-
-    document.getElementById('hdrSpan').textContent=
-      fmtD(globalMin)+' → '+fmtD(globalMax);
-
+    document.getElementById('hdrSpan').textContent=fmtD(globalMin)+' \u2192 '+fmtD(globalMax);
     buildPills();
     initTable(allData);
-
-    // give Tabulator two frames to finish its first render before reading page state
-    requestAnimationFrame(()=>requestAnimationFrame(()=>{ snapshotPage(); redraw(); }));
-  } catch(e) { showErr(String(e)); }
+    requestAnimationFrame(function(){requestAnimationFrame(function(){snapshotPage();redraw();});});
+  }catch(e){showErr(String(e));}
 }
-
-setTimeout(init, 200);
+setTimeout(init,200);
 </script>
 </body>
 </html>
