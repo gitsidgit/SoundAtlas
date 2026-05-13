@@ -3,179 +3,97 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Timeline Navigator</title>
+<title>Timeline Widget Demo</title>
+
+<!-- Host page dependencies: jQuery + Bootstrap 3 + Tabulator -->
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_bootstrap3.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/jquery@1.12.4/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/js/bootstrap.min.js"></script>
-<link href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_bootstrap3.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
+
 <style>
-  body { background:#f5f5f5; font-size:13px; }
-  .page-wrap { max-width:1400px; margin:0 auto; padding:16px; }
-  .sec-lbl { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:#999; }
-
-  /*
-   * FIX 1: cursor classes on the overview wrapper indicate which zone the mouse is in.
-   * ew-resize = near a handle edge (resize), grab = inside brush body (pan),
-   * crosshair = outside brush (draw new).
-   */
-  #ovWrap { position:relative; border:1px solid #ddd; border-radius:4px;
-            overflow:hidden; background:#fafafa;
-            -webkit-user-select:none; -ms-user-select:none; user-select:none;
-            cursor:crosshair; }
-  #ovWrap.cur-ew       { cursor:ew-resize; }
-  #ovWrap.cur-grab     { cursor:grab; }
-  #ovWrap.cur-grabbing { cursor:grabbing; }
-
-  canvas { width:100%; display:block; }
-  #brush { position:absolute; top:0; height:100%; pointer-events:none; }
-  #brushTip { position:absolute; bottom:4px; left:50%; -webkit-transform:translateX(-50%);
-              transform:translateX(-50%); background:rgba(0,0,0,.68); color:#fff;
-              font-size:9px; padding:2px 7px; border-radius:3px; white-space:nowrap;
-              pointer-events:none; }
-  .axis-row { display:-webkit-box; display:-ms-flexbox; display:flex;
-              -webkit-box-pack:justify; -ms-flex-pack:justify; justify-content:space-between;
-              font-size:10px; color:#999; margin-top:3px; padding:0 2px; }
-  .sel-bar { font-size:11px; color:#555; background:#fff; border:1px solid #ddd;
-             border-radius:4px; padding:5px 12px; }
-  .sel-bar span { margin-right:18px; }
-  .detail-toggle { background:none; border:none; padding:0; cursor:pointer; }
-  .detail-body { overflow:hidden; -webkit-transition:max-height .25s ease; transition:max-height .25s ease; }
-  .det-wrap { position:relative; border:1px solid #ddd; border-radius:4px;
-              overflow:hidden; background:#fafafa; cursor:crosshair; }
-  .exp-box { padding:8px 12px; background:#f9f9f9; border-top:1px solid #eee; font-size:11px; color:#666; }
-  .exp-tl  { position:relative; height:70px; border:1px solid #ddd; border-radius:4px;
-             overflow:hidden; background:#fff; margin-bottom:6px; }
-  /* FIX 5: focused row highlight in table */
-  .tabulator-row.row-focused { background:#fff8e1 !important; outline:2px solid #f0ad4e; outline-offset:-2px; }
-  #errBanner { display:none; }
-  .btn-scope-on { background-color:#337ab7 !important; color:#fff !important; border-color:#2e6da4 !important; }
+  body { background:#f5f5f5; font-size:13px; padding:16px; }
+  #demo-table { margin-top:16px; }
 </style>
 </head>
 <body>
-<div class="page-wrap">
 
-  <div style="margin-bottom:12px">
-    <h4 style="margin:0 0 2px">Timeline Navigator</h4>
-    <small class="text-muted" id="hdrSpan"></small>
-  </div>
-  <div id="errBanner" class="alert alert-danger" style="padding:6px 10px;font-size:12px"></div>
-
-  <!-- OVERVIEW -->
-  <div style="margin-bottom:4px">
-    <span class="sec-lbl">Overview</span>
-    <small class="text-muted" style="font-size:10px;margin-left:6px">
-      drag body to pan &nbsp;|&nbsp; drag handles to resize &nbsp;|&nbsp;
-      scroll to zoom &nbsp;|&nbsp; drag to edge to scroll
-    </small>
-  </div>
-  <div id="ovWrap">
-    <canvas id="ovCanvas" height="80"></canvas>
-    <div id="brush"><div id="brushTip"></div></div>
-  </div>
-  <div class="axis-row" style="margin-bottom:4px">
-    <span id="ovL"></span><span id="ovM"></span><span id="ovR"></span>
-  </div>
-  <!-- Overview zoom controls -->
-  <div style="margin-bottom:6px;display:-webkit-box;display:-ms-flexbox;display:flex;
-              -webkit-box-align:center;-ms-flex-align:center;align-items:center;gap:6px">
-    <span class="sec-lbl" style="margin:0">Overview zoom:</span>
-    <div class="btn-group btn-group-xs">
-      <button class="btn btn-default" onclick="ovZoom(0.5)" title="Zoom overview in">+</button>
-      <button class="btn btn-default" onclick="ovZoom(2)"   title="Zoom overview out">&minus;</button>
-      <button class="btn btn-default" onclick="ovReset()"   title="Reset overview to full range">Full</button>
-    </div>
-    <span id="ovZoomLbl" style="font-size:10px;color:#999;min-width:36px"></span>
-    <div style="margin-left:auto">
-      <input type="range" id="ovZoomSlider" min="1" max="50" value="1" step="1"
-             style="width:120px;vertical-align:middle"
-             oninput="ovZoomSlide(this.value)" title="Overview zoom level">
-    </div>
-  </div>
-  <div class="sel-bar" style="margin-bottom:12px">
-    <span><strong>From:</strong>&nbsp;<span id="selFrom">—</span></span>
-    <span><strong>To:</strong>&nbsp;<span id="selTo">—</span></span>
-    <span><strong>Span:</strong>&nbsp;<span id="selSpan">—</span></span>
-  </div>
-
-  <!-- DETAIL (collapsible) -->
-  <div style="margin-bottom:4px">
-    <button class="detail-toggle" onclick="toggleDetail()">
-      <span class="sec-lbl" style="vertical-align:middle">Detail</span>
-      <span id="detCaret" style="font-size:10px;color:#aaa;vertical-align:middle">&#9660;</span>
-      <small class="text-muted" style="font-size:10px;font-weight:400;vertical-align:middle">
-        — click segment to zoom &nbsp;|&nbsp; click table row to focus here
-      </small>
-    </button>
-  </div>
-  <div class="detail-body" id="detBody" style="max-height:200px">
-    <div class="det-wrap">
-      <canvas id="detCanvas" height="80"></canvas>
-    </div>
-    <div class="axis-row" style="margin-bottom:10px">
-      <span id="detL"></span><span id="detM"></span><span id="detR"></span>
-    </div>
-  </div>
-
-  <!-- controls: zoom + scope + lazy SVG toggle -->
-  <div style="margin-bottom:10px;display:-webkit-box;display:-ms-flexbox;display:flex;
-              -webkit-box-align:center;-ms-flex-align:center;align-items:center;-ms-flex-wrap:wrap;flex-wrap:wrap;gap:6px">
-    <div class="btn-group btn-group-sm" style="margin-right:4px">
-      <button class="btn btn-default" onclick="doZoom(2)">2x</button>
-      <button class="btn btn-default" onclick="doZoom(5)">5x</button>
-      <button class="btn btn-default" onclick="doZoom(10)">10x</button>
-      <button class="btn btn-default" onclick="doZoom(1)">Reset</button>
-    </div>
-    <div class="btn-group btn-group-sm pull-right">
-      <button class="btn btn-default btn-scope-on" id="btnAll"  onclick="setScope('all')">All data</button>
-      <button class="btn btn-default"              id="btnPage" onclick="setScope('page')">This page</button>
-    </div>
-    <!-- Lazy SVG checkbox: when checked, waveforms load on demand as rows scroll into view -->
-    <label style="font-size:11px;color:#555;margin:0;margin-left:8px;cursor:pointer"
-           title="Load waveform SVGs on demand to reduce memory use with large datasets">
-      <input type="checkbox" id="chkLazy" onchange="toggleLazy(this.checked)"
-             style="margin-right:4px;vertical-align:middle">
-      Lazy-load waveforms
-    </label>
-  </div>
-
-  <div id="tabulator"></div>
-</div><!-- /page-wrap -->
-
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     TIMELINE WIDGET  — drop the <script> block below onto any page.
+     It has zero external dependencies beyond Tabulator (already required).
+     CSS is fully scoped to .tlw-* so it cannot leak into the host page.
+     ═══════════════════════════════════════════════════════════════════════ -->
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-// PALETTE & WAVE TYPES
-// ─────────────────────────────────────────────────────────────────────────────
-var PAL    = ['#337ab7','#f0ad4e','#d9534f','#5cb85c','#9b59b6','#e67e22','#1abc9c','#e91e63'];
-var WTYPES = ['sine','square','sawtooth','noise','ecg','stepped'];
+/*
+ * TimelineWidget v1.0
+ *
+ * Usage:
+ *   var w = new TimelineWidget({
+ *     tableId    : '#my-table',      // CSS selector of the Tabulator table element (required)
+ *     containerId: '#my-container',  // where to mount the widget (required)
+ *     timeStart  : 'timestamp',      // field name for segment start  (ISO string or ms epoch)
+ *     timeEnd    : 'end_time',       // field name for segment end    (ISO string or ms epoch)
+ *     waveform   : 'wave_svg',       // field name holding an SVG *string* (optional)
+ *     label      : 'label',          // field name to show in expand panel (optional)
+ *     lazyWave   : false             // if true, detail canvas only draws waveforms for current page rows
+ *   });
+ *
+ * The widget reads data exclusively from the Tabulator instance — it never
+ * generates or transforms waveform data.  The SVG string stored in each row
+ * is injected verbatim into the expand panel and the detail canvas tooltip.
+ *
+ * Two-way sync:
+ *   • Brush drag / zoom  →  highlights matching rows in table (adds .tlw-row-focused)
+ *   • Table rowClick     →  zooms detail to that segment, opens expand panel
+ */
+(function(global){
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STATE
-// ─────────────────────────────────────────────────────────────────────────────
-var allData=[], globalMin=0, globalMax=1, globalSpan=1;
-// viewStart/viewEnd: the brush selection window as a fraction of globalSpan [0..1]
-var viewStart=0, viewEnd=1;
-// ovStart/ovEnd: the overview visible window as a fraction of globalSpan [0..1]
-// When ovStart=0 and ovEnd=1 the overview shows all time. Scrolling/zooming narrows it.
-var ovStart=0, ovEnd=1;
-var colorBy='level', activeFilters={}, colorMaps={};
-var table=null, scope='all', pageIds={}, busy=false, detailOpen=true;
-var focusedId=null;
-var HANDLE_PX=16;
-// lazy SVG: when true, waveform SVGs are injected only when the row is visible in the table viewport
-var lazyWave=false;
-var lazyObserver=null; // IntersectionObserver instance
+// ── injected CSS (scoped to .tlw-*) ──────────────────────────────────────────
+var TLW_CSS = [
+  '.tlw-root{font-family:inherit;font-size:13px;margin-bottom:12px}',
+  '.tlw-hdr{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}',
+  '.tlw-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#999}',
+  '.tlw-hint{font-size:10px;color:#aaa}',
+  /* overview */
+  '.tlw-ov-wrap{position:relative;border:1px solid #ddd;border-radius:4px;overflow:hidden;',
+  'background:#fafafa;-webkit-user-select:none;-ms-user-select:none;user-select:none;cursor:crosshair}',
+  '.tlw-ov-wrap.tlw-cur-ew{cursor:ew-resize}',
+  '.tlw-ov-wrap.tlw-cur-grab{cursor:grab}',
+  '.tlw-ov-wrap.tlw-cur-grabbing{cursor:grabbing}',
+  '.tlw-ov-wrap canvas{width:100%;display:block}',
+  '.tlw-brush{position:absolute;top:0;height:100%;pointer-events:none}',
+  '.tlw-brush-tip{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);',
+  'background:rgba(0,0,0,.68);color:#fff;font-size:9px;padding:2px 7px;border-radius:3px;',
+  'white-space:nowrap;pointer-events:none}',
+  /* axis */
+  '.tlw-axis{display:flex;justify-content:space-between;font-size:10px;color:#999;margin-top:3px;padding:0 2px;margin-bottom:4px}',
+  /* ov zoom row */
+  '.tlw-ovz{display:flex;align-items:center;gap:6px;margin-bottom:6px}',
+  '.tlw-ovz-lbl{font-size:10px;color:#999;min-width:32px}',
+  '.tlw-ovz input[type=range]{width:110px;vertical-align:middle}',
+  /* sel bar */
+  '.tlw-sel{font-size:11px;color:#555;background:#fff;border:1px solid #ddd;border-radius:4px;',
+  'padding:5px 12px;display:flex;flex-wrap:wrap;gap:0;margin-bottom:10px}',
+  '.tlw-sel span{margin-right:16px}',
+  /* detail */
+  '.tlw-det-toggle{background:none;border:none;padding:0;cursor:pointer;display:flex;align-items:center;gap:6px;margin-bottom:4px}',
+  '.tlw-det-body{overflow:hidden;transition:max-height .25s ease}',
+  '.tlw-det-wrap{position:relative;border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#fafafa;cursor:crosshair}',
+  '.tlw-det-wrap canvas{width:100%;display:block}',
+  /* controls */
+  '.tlw-ctrl{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px}',
+  '.tlw-row-focused{background:#fff8e1!important;outline:2px solid #f0ad4e;outline-offset:-2px}',
+  '.tlw-scope-on{background-color:#337ab7!important;color:#fff!important;border-color:#2e6da4!important}'
+].join('');
 
-// fixed colour per level for the simplified demo
-var LEVEL_COLOR={'INFO':'#337ab7','WARN':'#f0ad4e','ERROR':'#d9534f'};
-function rowColor(r){ return LEVEL_COLOR[r.level]||PAL[r.id%PAL.length]; }
-function getFiltered(){ return allData; }  // no filter UI — always all data
+function injectCSS(id){
+  if(document.getElementById(id)) return;
+  var s=document.createElement('style');
+  s.id=id; s.textContent=TLW_CSS; document.head.appendChild(s);
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UTILITIES
-// ─────────────────────────────────────────────────────────────────────────────
-function showErr(m){ var e=document.getElementById('errBanner'); e.style.display='block'; e.textContent='Error: '+m; }
-
+// ── helpers ───────────────────────────────────────────────────────────────────
 function fmtD(ts){
   return new Date(ts).toLocaleString('en-GB',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 }
@@ -185,639 +103,797 @@ function fmtS(ms){
   if(ms<86400000) return (ms/3600000).toFixed(1)+'h';
   return (ms/86400000).toFixed(1)+'d';
 }
+function toMs(v){ return typeof v==='number'?v:new Date(v).getTime(); }
 
-// timestamp → global fraction [0..1]
-function gFrac(ts){ return Math.max(0,Math.min(1,(ts-globalMin)/globalSpan)); }
+// ── constructor ───────────────────────────────────────────────────────────────
+function TimelineWidget(cfg){
+  this.cfg={
+    tableId    : cfg.tableId,
+    containerId: cfg.containerId,
+    timeStart  : cfg.timeStart  || 'timestamp',
+    timeEnd    : cfg.timeEnd    || 'end_time',
+    waveform   : cfg.waveform   || null,
+    label      : cfg.label      || null,
+    idField    : cfg.idField    || 'id',
+    lazyWave   : cfg.lazyWave   || false
+  };
 
-// is row inside the current view window?
-function inView(r){
-  var vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
+  // state
+  this.allData   =[];
+  this.globalMin =0;
+  this.globalMax =1;
+  this.globalSpan=1;
+  this.viewStart =0;   // brush selection [0..1]
+  this.viewEnd   =1;
+  this.ovStart   =0;   // overview viewport [0..1]
+  this.ovEnd     =1;
+  this.scope     ='all';
+  this.pageIds   ={};
+  this.focusedId =null;
+  this.detailOpen=true;
+  this.lazyWave  =this.cfg.lazyWave;
+  this.HANDLE_PX   =16;
+  this.MIN_BRUSH_PX=40;  // minimum brush width in pixels — prevents handles colliding
+  this.MIN_EDGE_PX =6;   // minimum px gap between brush edge and overview canvas edge
+  this.PAL       =['#337ab7','#f0ad4e','#d9534f','#5cb85c','#9b59b6','#e67e22','#1abc9c','#e91e63'];
+  this.LEVEL_COLOR={'INFO':'#337ab7','WARN':'#f0ad4e','ERROR':'#d9534f'};
+
+  // brush drag state
+  this._bActive=false; this._bMode=null; this._bAnchor=0; this._bsSnap=0; this._beSnap=0;
+  this._edgeRAF=null;
+  this.EDGE_ZONE=0.05; this.SCROLL_SPD=0.006;
+
+  injectCSS('tlw-css');
+  this._buildDOM();
+  this._bindEvents();
+  this._attachToTable();
+}
+
+// ── DOM construction ──────────────────────────────────────────────────────────
+TimelineWidget.prototype._buildDOM=function(){
+  var id='tlw-'+Math.random().toString(36).slice(2,7);
+  this._id=id;
+  var h=[
+    '<div class="tlw-root" id="'+id+'">',
+    // header
+    '<div class="tlw-hdr">',
+    '  <span class="tlw-title">Overview</span>',
+    '  <span class="tlw-hint">drag brush &nbsp;|&nbsp; drag handles to resize &nbsp;|&nbsp; scroll to zoom &nbsp;|&nbsp; drag to edge to scroll</span>',
+    '</div>',
+    // overview canvas
+    '<div class="tlw-ov-wrap" id="'+id+'-ov">',
+    '  <canvas id="'+id+'-ovc" height="80"></canvas>',
+    '  <div class="tlw-brush" id="'+id+'-br">',
+    '    <div class="tlw-brush-tip" id="'+id+'-tip"></div>',
+    '  </div>',
+    '</div>',
+    '<div class="tlw-axis"><span id="'+id+'-ovL"></span><span id="'+id+'-ovM"></span><span id="'+id+'-ovR"></span></div>',
+    // overview zoom controls
+    '<div class="tlw-ovz">',
+    '  <span class="tlw-title" style="margin:0">Ov zoom:</span>',
+    '  <div class="btn-group btn-group-xs">',
+    '    <button class="btn btn-default" id="'+id+'-ovZin">+</button>',
+    '    <button class="btn btn-default" id="'+id+'-ovZout">&minus;</button>',
+    '    <button class="btn btn-default" id="'+id+'-ovZrst">Full</button>',
+    '  </div>',
+    '  <span class="tlw-ovz-lbl" id="'+id+'-ovZlbl">1x</span>',
+    '  <input type="range" id="'+id+'-ovZslider" min="1" max="50" value="1" step="1">',
+    '</div>',
+    // selection info
+    '<div class="tlw-sel">',
+    '  <span><strong>From:</strong>&nbsp;<span id="'+id+'-sFrom">—</span></span>',
+    '  <span><strong>To:</strong>&nbsp;<span id="'+id+'-sTo">—</span></span>',
+    '  <span><strong>Span:</strong>&nbsp;<span id="'+id+'-sSpan">—</span></span>',
+    '</div>',
+    // detail (collapsible)
+    '<button class="tlw-det-toggle" id="'+id+'-dtog">',
+    '  <span class="tlw-title" style="margin:0">Detail</span>',
+    '  <span id="'+id+'-dcaret" style="font-size:10px;color:#aaa">&#9660;</span>',
+    '  <span class="tlw-hint">click segment to zoom &nbsp;|&nbsp; click table row to focus</span>',
+    '</button>',
+    '<div class="tlw-det-body" id="'+id+'-dbody" style="max-height:200px">',
+    '  <div class="tlw-det-wrap" id="'+id+'-dw">',
+    '    <canvas id="'+id+'-detc" height="80"></canvas>',
+    '  </div>',
+    '  <div class="tlw-axis"><span id="'+id+'-detL"></span><span id="'+id+'-detM"></span><span id="'+id+'-detR"></span></div>',
+    '</div>',
+    // controls
+    '<div class="tlw-ctrl">',
+    '  <div class="btn-group btn-group-sm">',
+    '    <button class="btn btn-default" id="'+id+'-z2">2x</button>',
+    '    <button class="btn btn-default" id="'+id+'-z5">5x</button>',
+    '    <button class="btn btn-default" id="'+id+'-z10">10x</button>',
+    '    <button class="btn btn-default" id="'+id+'-zr">Reset</button>',
+    '  </div>',
+    '  <div class="btn-group btn-group-sm" style="margin-left:auto">',
+    '    <button class="btn btn-default tlw-scope-on" id="'+id+'-sAll">All data</button>',
+    '    <button class="btn btn-default" id="'+id+'-sPage">This page</button>',
+    '  </div>',
+    '  <label style="font-size:11px;color:#555;margin:0;cursor:pointer" title="Detail canvas only draws waveforms for current page rows">',
+    '    <input type="checkbox" id="'+id+'-lazy">&nbsp;Lazy detail',
+    '  </label>',
+    '</div>',
+    '</div>'
+  ].join('');
+
+  var el=document.querySelector(this.cfg.containerId);
+  if(!el){ console.error('TimelineWidget: containerId not found:',this.cfg.containerId); return; }
+  el.innerHTML=h;
+  this._root=document.getElementById(id);
+};
+
+// ── convenience element accessors ─────────────────────────────────────────────
+TimelineWidget.prototype._el=function(suffix){ return document.getElementById(this._id+'-'+suffix); };
+TimelineWidget.prototype._setText=function(suffix,v){ var e=this._el(suffix); if(e) e.textContent=v; };
+
+// ── attach to the Tabulator table ─────────────────────────────────────────────
+TimelineWidget.prototype._attachToTable=function(){
+  var self=this;
+  var tables=Tabulator.findTable(this.cfg.tableId);
+  if(!tables||!tables.length){
+    setTimeout(function(){ self._attachToTable(); },100);
+    return;
+  }
+  this._table=tables[0];
+
+  // wire events first so we never miss a fire
+  this._table.on('dataLoaded',  function(){ self._loadData(); });
+  this._table.on('dataChanged', function(){ self._loadData(); });
+  this._table.on('pageLoaded',  function(){
+    self._snapshotPage();
+    if(self.scope==='page') self.redraw();
+    setTimeout(function(){ self._applyFocusHighlight(); },50);
+  });
+  this._table.on('rowClick', function(e,row){
+    self._onRowClick(row.getData());
+  });
+
+  // Tabulator may already have data loaded before we attached — pull it now.
+  // Use a short delay so Tabulator's own initialisation settles first.
+  setTimeout(function(){ self._loadData(); }, 50);
+};
+
+// ── load / reload data from Tabulator ────────────────────────────────────────
+TimelineWidget.prototype._loadData=function(){
+  var self=this, cfg=this.cfg;
+  var raw=this._table.getData();
+  if(!raw||!raw.length) return;
+  this.allData=raw.map(function(r){
+    return {
+      _id  : r[cfg.label]||r.id||r.label||'',
+      _ts  : toMs(r[cfg.timeStart]),
+      _te  : toMs(r[cfg.timeEnd]),
+      _svg : cfg.waveform ? (r[cfg.waveform]||null) : null,
+      _raw : r
+    };
+  }).filter(function(r){ return !isNaN(r._ts)&&!isNaN(r._te); })
+    .sort(function(a,b){ return a._ts-b._ts; });
+
+  if(!this.allData.length) return;
+  this.globalMin =this.allData[0]._ts;
+  this.globalMax =Math.max.apply(null,this.allData.map(function(r){return r._te;}));
+  this.globalSpan=this.globalMax-this.globalMin||1;
+
+  // Short delay so Tabulator finishes rendering page 1 before we draw.
+  setTimeout(function(){ self.redraw(); }, 80);
+};
+
+// ── row colour — use level field if present, else cycle palette ───────────────
+TimelineWidget.prototype._color=function(r){
+  var raw=r._raw, lc=this.LEVEL_COLOR;
+  if(raw.level&&lc[raw.level]) return lc[raw.level];
+  // fall back to palette keyed by original row id
+  var idx=(raw.id||0)%this.PAL.length;
+  return this.PAL[idx];
+};
+
+// ── snapshot page ids — used by scope toggle (This page) only ─────────────────
+TimelineWidget.prototype._snapshotPage=function(){
+  var ids=this._getTableVisibleIds();
+  this.pageIds=ids||{};
+};
+
+// ── get current page row ids directly from Tabulator at call time ─────────────
+TimelineWidget.prototype._getTableVisibleIds=function(){
+  if(!this._table) return null;
+  try{
+    var active=this._table.getData('active');
+    var ps=this._table.getPageSize()||25, pg=this._table.getPage()||1;
+    if(pg<1) pg=1;
+    var sl=active.slice((pg-1)*ps, pg*ps);
+    var ids={}, idField=this.cfg.idField||'id';
+    sl.forEach(function(r){ ids[String(r[idField])]=1; });
+    console.log('[TLW lazy] page='+pg+' ps='+ps+' active='+active.length+' slice='+sl.length+' ids='+Object.keys(ids).slice(0,5).join(','));
+    return ids;
+  }catch(e){ console.error('[TLW lazy] error',e); return null; }
+};
+
+// ── view helpers ──────────────────────────────────────────────────────────────
+TimelineWidget.prototype._inView=function(r){
+  var vs=this.globalMin+this.viewStart*this.globalSpan;
+  var ve=this.globalMin+this.viewEnd  *this.globalSpan;
   return r._te>vs && r._ts<ve;
-}
-
-function getVisible(){ return getFiltered().filter(inView); }
-
-// rows to show in the detail canvas (page-scoped if needed)
-function getScopedRows(){
-  var base=getFiltered().filter(inView);
-  if(scope==='page' && Object.keys(pageIds).length)
-    return base.filter(function(r){ return !!pageIds[r.id]; });
+};
+TimelineWidget.prototype._gFrac=function(ts){
+  return Math.max(0,Math.min(1,(ts-this.globalMin)/this.globalSpan));
+};
+TimelineWidget.prototype._getVisible=function(){
+  var self=this; return this.allData.filter(function(r){ return self._inView(r); });
+};
+TimelineWidget.prototype._getScopedRows=function(){
+  var self=this, base=this._getVisible();
+  var idField=this.cfg.idField||'id';
+  if(this.scope==='page'&&Object.keys(this.pageIds).length)
+    return base.filter(function(r){ return !!self.pageIds[String(r._raw[idField])]; });
   return base;
-}
+};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OVERVIEW COORDINATE HELPERS
-// These are the ONLY functions that should map between global fractions and pixels.
-// ─────────────────────────────────────────────────────────────────────────────
-function ovW(){ return document.getElementById('ovCanvas').width || document.getElementById('ovWrap').clientWidth || 900; }
+// ── overview coordinate helpers ───────────────────────────────────────────────
+TimelineWidget.prototype._ovW=function(){
+  // Use the wrapper's clientWidth — reliable before and after first draw.
+  // cv.width is the pixel buffer width set during drawOverview; before first
+  // draw it may be 0 or the HTML attribute default.
+  var wrap=this._el('ov');
+  return (wrap&&wrap.clientWidth)||900;
+};
+TimelineWidget.prototype._fracToOvPx=function(f){
+  return Math.round((f-this.ovStart)/(this.ovEnd-this.ovStart)*this._ovW());
+};
+TimelineWidget.prototype._ovPxToFrac=function(px){
+  return this.ovStart+(px/this._ovW())*(this.ovEnd-this.ovStart);
+};
+TimelineWidget.prototype._mouseToOvPx=function(e){
+  var rc=this._el('ov').getBoundingClientRect();
+  return Math.max(0,Math.min(rc.width,e.clientX-rc.left));
+};
 
-// global fraction → pixel X on overview canvas
-function fracToOvPx(f){ return Math.round((f-ovStart)/(ovEnd-ovStart)*ovW()); }
+// ── handle drawing helper ─────────────────────────────────────────────────────
+TimelineWidget.prototype._drawHandle=function(ctx,cx,cy){
+  var HW=11,HH=22,R=4;
+  function rr(c,x,y,w,h,r){
+    c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);
+    c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);
+    c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath();
+  }
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.18)';ctx.shadowBlur=4;
+  ctx.fillStyle='#fff';rr(ctx,cx-HW/2,cy-HH/2,HW,HH,R);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='#337ab7';ctx.lineWidth=1.5;rr(ctx,cx-HW/2,cy-HH/2,HW,HH,R);ctx.stroke();
+  ctx.strokeStyle='#aaa';ctx.lineWidth=1;
+  [-4,0,4].forEach(function(dy){
+    ctx.beginPath();ctx.moveTo(cx-3,cy+dy);ctx.lineTo(cx+3,cy+dy);ctx.stroke();
+  });
+  ctx.restore();
+};
 
-// mouse event → pixel X on overview canvas (clamped)
-function mouseToOvPx(e){
-  var rc=document.getElementById('ovWrap').getBoundingClientRect();
-  return Math.max(0,Math.min(rc.width, e.clientX-rc.left));
-}
+// ── DRAW OVERVIEW ─────────────────────────────────────────────────────────────
+TimelineWidget.prototype.drawOverview=function(){
+  var cv=this._el('ovc');
+  var W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=80;
+  var ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,80);
+  var self=this, n=this.allData.length;
+  if(!n) return;
+  var DTOP=4,DBOT=58,DH=DBOT-DTOP;
+  var slotH=DH/n, barH=Math.max(1,Math.min(4,Math.floor(slotH)));
+  var pidx=this.pageIds;
+  var idField=this.cfg.idField||'id';
+  this.allData.forEach(function(r,i){
+    var f1=self._gFrac(r._ts), f2=self._gFrac(r._te);
+    if(f2<self.ovStart||f1>self.ovEnd) return;
+    var x1=Math.max(0,self._fracToOvPx(f1));
+    var x2=Math.min(W,self._fracToOvPx(f2)); if(x2<x1+2)x2=x1+2;
+    var y=DTOP+Math.round(i*slotH); if(y+barH>DBOT) return;
+    var inScope=(self.scope==='page')
+      ? !!pidx[String(r._raw[idField])]
+      : true;
+    ctx.fillStyle=inScope?self._color(r)+'cc':self._color(r)+'33';
+    ctx.fillRect(x1,y,x2-x1,barH);
+  });
+  var bx1=Math.max(0,this._fracToOvPx(this.viewStart));
+  var bx2=Math.min(W,this._fracToOvPx(this.viewEnd));
+  ctx.fillStyle='rgba(51,122,183,0.10)';ctx.fillRect(bx1,0,bx2-bx1,80);
+  ctx.strokeStyle='#337ab7';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(bx1,0);ctx.lineTo(bx1,80);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(bx2,0);ctx.lineTo(bx2,80);ctx.stroke();
+  this._drawHandle(ctx,bx1,40);
+  this._drawHandle(ctx,bx2,40);
+  var br=this._el('br');
+  br.style.left=bx1+'px';br.style.width=Math.max(8,bx2-bx1)+'px';
+  br.style.top='0';br.style.height='80px';
+};
 
-// pixel X on overview canvas → global fraction
-function ovPxToFrac(px){ return ovStart+(px/ovW())*(ovEnd-ovStart); }
+// ── DRAW DETAIL ───────────────────────────────────────────────────────────────
+// lazyWave=false: draw waveforms for every visible scoped row.
+// lazyWave=true:  draw waveforms ONLY for rows on the current table page —
+//                 queried directly from Tabulator at draw time (never stale).
+//                 Colour blocks still drawn for all visible rows.
+// SVG strings are read directly from row data — never generated by the widget.
+TimelineWidget.prototype.drawDetail=function(){
+  var cv=this._el('detc');
+  var W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=80;
+  var ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,80);
+  var self=this;
+  var vs=this.globalMin+this.viewStart*this.globalSpan;
+  var ve=this.globalMin+this.viewEnd  *this.globalSpan;
+  var sp=ve-vs||1;
+  function toX(ts){return Math.round((ts-vs)/sp*W);}
+  ctx.strokeStyle='#ececec';ctx.lineWidth=1;
+  [1,2,3].forEach(function(i){ctx.beginPath();ctx.moveTo(W/4*i,0);ctx.lineTo(W/4*i,80);ctx.stroke();});
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SEEDED RNG
-// ─────────────────────────────────────────────────────────────────────────────
+  var scoped=this._getScopedRows();
+  var idField=this.cfg.idField||'id';
+
+  // if lazy, fetch current page ids fresh from Tabulator right now
+  var lazyIds=this.lazyWave ? this._getTableVisibleIds() : null;
+  var _logged=false, _logged2=false;
+
+  scoped.forEach(function(r){
+    if(!self._inView(r)) return;
+    var x1=Math.max(0,toX(r._ts)), x2=Math.min(W,Math.max(x1+4,toX(r._te)));
+    var c=self._color(r), seg=x2-x1;
+
+    ctx.fillStyle=c+'22';ctx.fillRect(x1,4,seg,72);
+    ctx.fillStyle=c+'cc';ctx.fillRect(x1,4,2,72);
+
+    var rowId=String(r._raw[idField]);
+    if(self.lazyWave && !_logged){
+      console.log('[TLW lazy] first rowId="'+rowId+'" inLazyIds='+!!(lazyIds&&lazyIds[rowId])+' lazyIds keys sample='+JSON.stringify(lazyIds?Object.keys(lazyIds).slice(0,5):[]));
+      _logged=true;
+    }
+    var drawWave=r._svg && seg>12 && (!self.lazyWave || (lazyIds && lazyIds[rowId]));
+    if(self.lazyWave && !_logged2){ console.log('[TLW draw] rowId='+rowId+' seg='+seg+' hasSVG='+!!r._svg+' drawWave='+drawWave); _logged2=true; }
+    if(drawWave){
+      ctx.save();
+      ctx.beginPath();ctx.rect(x1,4,seg,72);ctx.clip();
+      ctx.strokeStyle=c+'bb';ctx.lineWidth=1.2;
+      self._drawSVGOnCanvas(ctx,r._svg,x1,4,seg,72);
+      ctx.restore();
+    }
+
+    // focus ring
+    if(rowId===String(self.focusedId)){
+      ctx.save();ctx.strokeStyle='#f0ad4e';ctx.lineWidth=2.5;
+      ctx.strokeRect(x1+1,5,x2-x1-2,70);ctx.restore();
+    }
+  });
+};
+
+// Parse an SVG string and replay its path/polyline onto a canvas 2d context,
+// scaled to fit the given bounding box (x,y,w,h).
+// This is the ONLY place SVG data is consumed — it is never modified.
+TimelineWidget.prototype._drawSVGOnCanvas=function(ctx,svgStr,x,y,w,h){
+  // extract viewBox to know the SVG's own coordinate space
+  var vbMatch=svgStr.match(/viewBox=["']([^"']+)["']/);
+  var svgW=400,svgH=80;
+  if(vbMatch){
+    var parts=vbMatch[1].trim().split(/[\s,]+/);
+    svgW=parseFloat(parts[2])||400;
+    svgH=parseFloat(parts[3])||80;
+  }
+  var sx=w/svgW, sy=h/svgH;
+
+  // try <path d="...">
+  var pathMatch=svgStr.match(/<path[^>]+\bd=["']([^"']+)["']/);
+  if(pathMatch){
+    var cmds=pathMatch[1].match(/[MLCQZmlcqz][^MLCQZmlcqz]*/g)||[];
+    ctx.beginPath();
+    cmds.forEach(function(cmd){
+      var t=cmd[0], nums=(cmd.slice(1).trim().match(/-?[\d.]+/g)||[]).map(Number);
+      if(t==='M'||t==='m'){
+        for(var i=0;i<nums.length;i+=2) ctx.moveTo(x+nums[i]*sx, y+nums[i+1]*sy);
+      } else if(t==='L'||t==='l'){
+        for(var i=0;i<nums.length;i+=2) ctx.lineTo(x+nums[i]*sx, y+nums[i+1]*sy);
+      } else if(t==='Z'||t==='z'){
+        ctx.closePath();
+      }
+    });
+    ctx.stroke(); return;
+  }
+
+  // try <polyline points="...">
+  var plMatch=svgStr.match(/<polyline[^>]+points=["']([^"']+)["']/);
+  if(plMatch){
+    var pts=plMatch[1].trim().split(/\s+/);
+    ctx.beginPath();
+    pts.forEach(function(pt,i){
+      var xy=pt.split(',');
+      var px=x+parseFloat(xy[0])*sx, py=y+parseFloat(xy[1])*sy;
+      i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+    });
+    ctx.stroke();
+  }
+};
+
+// ── axis labels ───────────────────────────────────────────────────────────────
+TimelineWidget.prototype._updateAxis=function(){
+  var vs=this.globalMin+this.viewStart*this.globalSpan;
+  var ve=this.globalMin+this.viewEnd  *this.globalSpan;
+  var ots=this.globalMin+this.ovStart*this.globalSpan;
+  var ote=this.globalMin+this.ovEnd  *this.globalSpan;
+  this._setText('ovL', fmtD(ots));
+  this._setText('ovM', fmtD((ots+ote)/2));
+  this._setText('ovR', fmtD(ote));
+  this._setText('detL',fmtD(vs));
+  this._setText('detM',fmtD((vs+ve)/2));
+  this._setText('detR',fmtD(ve));
+  this._setText('sFrom',fmtD(vs));
+  this._setText('sTo',  fmtD(ve));
+  this._setText('sSpan',fmtS(ve-vs));
+  this._el('tip').textContent=fmtD(vs)+' \u2192 '+fmtD(ve)+' ('+fmtS(ve-vs)+')';
+};
+
+TimelineWidget.prototype._syncOvZoomUI=function(){
+  var w=this.ovEnd-this.ovStart, level=Math.round(1/w);
+  this._setText('ovZlbl',level+'x');
+  var sl=this._el('ovZslider'); if(sl) sl.value=Math.min(50,Math.max(1,level));
+};
+
+// ── full redraw ───────────────────────────────────────────────────────────────
+TimelineWidget.prototype.redraw=function(){
+  this.drawOverview();
+  this.drawDetail();
+  this._updateAxis();
+  this._syncOvZoomUI();
+};
+
+// ── focus highlight on host table rows ────────────────────────────────────────
+TimelineWidget.prototype._applyFocusHighlight=function(){
+  if(!this._table||!this.focusedId) return;
+  var self=this, idField=this.cfg.idField||'id';
+  try{
+    this._table.getRows().forEach(function(r){
+      r.getElement().classList.remove('tlw-row-focused');
+    });
+    var found=this._table.getRows().filter(function(r){
+      return String(r.getData()[idField])===String(self.focusedId);
+    });
+    if(found.length) found[0].getElement().classList.add('tlw-row-focused');
+  }catch(ex){}
+};
+
+// ── row click handler ─────────────────────────────────────────────────────────
+// Zooms the Detail view to the clicked row. No expand panel in the table —
+// the Detail canvas IS the enlarged view.
+TimelineWidget.prototype._onRowClick=function(rawRow){
+  var idField=this.cfg.idField||'id';
+  var id=String(rawRow[idField]);
+  var match=null;
+  for(var i=0;i<this.allData.length;i++){
+    if(String(this.allData[i]._raw[idField])===id){match=this.allData[i];break;}
+  }
+  if(!match) return;
+  this.focusedId=id;
+  var pad=(match._te-match._ts)*0.3;
+  this.viewStart=Math.max(0,(match._ts-pad-this.globalMin)/this.globalSpan);
+  this.viewEnd  =Math.min(1,(match._te+pad-this.globalMin)/this.globalSpan);
+  // scroll overview so brush midpoint is visible
+  var mid=(this.viewStart+this.viewEnd)/2, ow=this.ovEnd-this.ovStart;
+  if(mid<this.ovStart||mid>this.ovEnd){
+    this.ovStart=Math.max(0,mid-ow/2);
+    this.ovEnd  =Math.min(1,this.ovStart+ow);
+    if(this.ovEnd>1){this.ovEnd=1;this.ovStart=Math.max(0,1-ow);}
+  }
+  if(!this.detailOpen) this._toggleDetail();
+  this.redraw();
+  this._applyFocusHighlight();
+};
+
+// ── toggle detail panel ───────────────────────────────────────────────────────
+TimelineWidget.prototype._toggleDetail=function(){
+  this.detailOpen=!this.detailOpen;
+  this._el('dbody').style.maxHeight=this.detailOpen?'200px':'0';
+  this._el('dcaret').innerHTML=this.detailOpen?'&#9660;':'&#9654;';
+};
+
+// ── scope ─────────────────────────────────────────────────────────────────────
+TimelineWidget.prototype._setScope=function(s){
+  this.scope=s;
+  this._el('sAll').className ='btn btn-default'+(s==='all'?' tlw-scope-on':'');
+  this._el('sPage').className='btn btn-default'+(s==='page'?' tlw-scope-on':'');
+  if(s==='all'){this.viewStart=0;this.viewEnd=1;this.ovStart=0;this.ovEnd=1;}
+  this.redraw();
+};
+
+// ── overview zoom ─────────────────────────────────────────────────────────────
+TimelineWidget.prototype._ovZoom=function(factor){
+  var c=(this.ovStart+this.ovEnd)/2, hw=(this.ovEnd-this.ovStart)*factor/2;
+  hw=Math.min(0.5,Math.max(0.01,hw));
+  this.ovStart=Math.max(0,c-hw); this.ovEnd=Math.min(1,c+hw);
+  this.redraw();
+};
+TimelineWidget.prototype._ovReset=function(){this.ovStart=0;this.ovEnd=1;this.redraw();};
+TimelineWidget.prototype._ovZoomSlide=function(val){
+  var w=1/Math.max(1,parseFloat(val));
+  w=Math.min(1,Math.max(0.02,w));
+  var c=(this.ovStart+this.ovEnd)/2;
+  this.ovStart=Math.max(0,c-w/2); this.ovEnd=Math.min(1,this.ovStart+w);
+  if(this.ovEnd>1){this.ovEnd=1;this.ovStart=Math.max(0,1-w);}
+  this.redraw();
+};
+
+// ── zoom / pan (detail view) ──────────────────────────────────────────────────
+TimelineWidget.prototype._zoom=function(f){
+  var m=(this.viewStart+this.viewEnd)/2, h=(1/f)/2;
+  this.viewStart=Math.max(0,m-h); this.viewEnd=Math.min(1,m+h); this.redraw();
+};
+
+// ── edge scroll ───────────────────────────────────────────────────────────────
+TimelineWidget.prototype._stopEdgeScroll=function(){
+  if(this._edgeRAF){cancelAnimationFrame(this._edgeRAF);this._edgeRAF=null;}
+};
+TimelineWidget.prototype._startEdgeScroll=function(dir){
+  this._stopEdgeScroll();
+  var self=this;
+  function step(){
+    var ow=self.ovEnd-self.ovStart;
+    self.ovStart=Math.max(0,Math.min(1-ow,self.ovStart+dir*self.SCROLL_SPD));
+    self.ovEnd=self.ovStart+ow;
+    self.redraw();
+    self._edgeRAF=requestAnimationFrame(step);
+  }
+  this._edgeRAF=requestAnimationFrame(step);
+};
+
+// ── bind all DOM events ───────────────────────────────────────────────────────
+TimelineWidget.prototype._bindEvents=function(){
+  var self=this;
+
+  // detail toggle
+  this._el('dtog').addEventListener('click',function(){ self._toggleDetail(); });
+
+  // zoom buttons
+  this._el('z2') .addEventListener('click',function(){ self._zoom(2);  });
+  this._el('z5') .addEventListener('click',function(){ self._zoom(5);  });
+  this._el('z10').addEventListener('click',function(){ self._zoom(10); });
+  this._el('zr') .addEventListener('click',function(){ self._zoom(1);  });
+
+  // scope buttons
+  this._el('sAll') .addEventListener('click',function(){ self._setScope('all');  });
+  this._el('sPage').addEventListener('click',function(){ self._setScope('page'); });
+
+  // lazy checkbox — drawDetail calls _getTableVisibleIds() fresh at draw time
+  this._el('lazy').addEventListener('change',function(){
+    self.lazyWave=this.checked;
+    self.redraw();
+  });
+
+  // overview zoom buttons + slider
+  this._el('ovZin')    .addEventListener('click',function(){ self._ovZoom(0.5); });
+  this._el('ovZout')   .addEventListener('click',function(){ self._ovZoom(2);   });
+  this._el('ovZrst')   .addEventListener('click',function(){ self._ovReset();   });
+  this._el('ovZslider').addEventListener('input',function(){ self._ovZoomSlide(this.value); });
+
+  // overview canvas: brush interaction
+  var ovEl=this._el('ov');
+
+  ovEl.addEventListener('mousemove',function(e){
+    if(self._bActive) return;
+    var px=self._mouseToOvPx(e);
+    var bx1=self._fracToOvPx(self.viewStart), bx2=self._fracToOvPx(self.viewEnd);
+    var gf=self._ovPxToFrac(px);
+    if(Math.abs(px-bx1)<self.HANDLE_PX||Math.abs(px-bx2)<self.HANDLE_PX)
+      ovEl.className='tlw-ov-wrap tlw-cur-ew';
+    else if(gf>self.viewStart&&gf<self.viewEnd)
+      ovEl.className='tlw-ov-wrap tlw-cur-grab';
+    else
+      ovEl.className='tlw-ov-wrap';
+  });
+  ovEl.addEventListener('mouseleave',function(){ if(!self._bActive) ovEl.className='tlw-ov-wrap'; });
+
+  ovEl.addEventListener('mousedown',function(e){
+    var px=self._mouseToOvPx(e), gf=self._ovPxToFrac(px);
+    var bx1=self._fracToOvPx(self.viewStart), bx2=self._fracToOvPx(self.viewEnd);
+    if(Math.abs(px-bx1)<self.HANDLE_PX)           self._bMode='L';
+    else if(Math.abs(px-bx2)<self.HANDLE_PX)      self._bMode='R';
+    else if(gf>self.viewStart&&gf<self.viewEnd)  { self._bMode='M';self._bAnchor=gf;self._bsSnap=self.viewStart;self._beSnap=self.viewEnd; }
+    else                                         { self._bMode='N';self._bAnchor=gf;self.viewStart=gf;self.viewEnd=gf+.001; }
+    self._bActive=true;
+    ovEl.className='tlw-ov-wrap '+((self._bMode==='L'||self._bMode==='R')?'tlw-cur-ew':'tlw-cur-grabbing');
+    e.preventDefault();
+  });
+
+  // mousemove + mouseup on document so drag works outside the element
+  var mmHandler=function(e){
+    if(!self._bActive) return;
+    var px=self._mouseToOvPx(e), gf=self._ovPxToFrac(px), w=self.viewEnd-self.viewStart;
+    var W=self._ovW();
+    // convert minimum pixel constraints to global fractions
+    var minW =(self.MIN_BRUSH_PX/W)*(self.ovEnd-self.ovStart); // min brush width in frac
+    var minEdge=(self.MIN_EDGE_PX /W)*(self.ovEnd-self.ovStart); // min edge gap in frac
+    var lo=self.ovStart+minEdge;   // leftmost viewStart allowed
+    var hi=self.ovEnd  -minEdge;   // rightmost viewEnd allowed
+
+    if(self._bMode==='L'){
+      self.viewStart=Math.max(lo, Math.min(self.viewEnd-minW, gf));
+    } else if(self._bMode==='R'){
+      self.viewEnd  =Math.min(hi, Math.max(self.viewStart+minW, gf));
+    } else if(self._bMode==='M'){
+      var d=gf-self._bAnchor;
+      self.viewStart=Math.max(lo,Math.min(hi-w,self._bsSnap+d));
+      self.viewEnd=self.viewStart+w;
+      if(self.viewEnd>hi){self.viewEnd=hi;self.viewStart=hi-w;}
+    } else {
+      // drawing a new selection
+      self.viewStart=Math.min(self._bAnchor,gf);
+      self.viewEnd  =Math.max(self._bAnchor,gf);
+      // enforce minimum width from whichever side the user dragged from
+      if(self.viewEnd-self.viewStart<minW) self.viewEnd=self.viewStart+minW;
+      self.viewStart=Math.max(lo,self.viewStart);
+      self.viewEnd  =Math.min(hi,self.viewEnd);
+    }
+    var rawPct=px/W;
+    if(rawPct<self.EDGE_ZONE&&self.ovStart>0)        self._startEdgeScroll(-1);
+    else if(rawPct>(1-self.EDGE_ZONE)&&self.ovEnd<1) self._startEdgeScroll(1);
+    else                                             self._stopEdgeScroll();
+    self.redraw();
+  };
+  var muHandler=function(){
+    if(self._bActive){
+      self._bActive=false;
+      self._stopEdgeScroll();
+      ovEl.className='tlw-ov-wrap';
+    }
+  };
+  document.addEventListener('mousemove',mmHandler);
+  document.addEventListener('mouseup',  muHandler);
+
+  // scroll wheel on overview
+  ovEl.addEventListener('wheel',function(e){
+    e.preventDefault();
+    var px=self._mouseToOvPx(e), pivot=self._ovPxToFrac(px);
+    var factor=e.deltaY>0?1.3:0.77;
+    var ow=self.ovEnd-self.ovStart, nw=Math.min(1,Math.max(0.02,ow*factor));
+    var ratio=(pivot-self.ovStart)/ow;
+    self.ovStart=Math.max(0,pivot-ratio*nw);
+    self.ovEnd  =Math.min(1,self.ovStart+nw);
+    if(self.ovEnd>1){self.ovEnd=1;self.ovStart=Math.max(0,1-nw);}
+    self.redraw();
+  },{passive:false});
+
+  // click on detail canvas → zoom into segment
+  this._el('dw').addEventListener('click',function(e){
+    var cv=self._el('detc'), rc=cv.getBoundingClientRect();
+    var ts=(self.globalMin+self.viewStart*self.globalSpan)+
+           ((e.clientX-rc.left)/rc.width)*(self.viewEnd-self.viewStart)*self.globalSpan;
+    var hit=self._getVisible().filter(function(r){return r._ts<=ts&&r._te>=ts;});
+    if(hit.length){
+      var s=hit[0], pad=(s._te-s._ts)*.2;
+      self.viewStart=Math.max(0,(s._ts-pad-self.globalMin)/self.globalSpan);
+      self.viewEnd  =Math.min(1,(s._te+pad-self.globalMin)/self.globalSpan);
+      self.focusedId=String(s._raw[self.cfg.idField||'id']);
+      self.redraw();
+      self._applyFocusHighlight();
+    }
+  });
+
+  // resize: redraw when container width changes
+  if(window.ResizeObserver){
+    var ro=new ResizeObserver(function(){ self.redraw(); });
+    ro.observe(this._root);
+  }
+};
+
+// ── expose globally ───────────────────────────────────────────────────────────
+global.TimelineWidget=TimelineWidget;
+
+}(window));
+</script>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     END OF WIDGET
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     DEMO USAGE
+     Build a normal Tabulator table, then attach the widget to it.
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<!-- Widget mounts here -->
+<div id="timeline-container"></div>
+
+<!-- Tabulator table -->
+<div id="demo-table"></div>
+
+<script>
+// ── seeded RNG + waveform (demo only — in production your rows already have SVGs) ──
 function mkRng(seed){ var s=seed; return function(){ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WAVEFORM
-// ─────────────────────────────────────────────────────────────────────────────
-function makeWave(seed,color){
-  var rng=mkRng(seed+1), type=WTYPES[seed%WTYPES.length];
+function makeSVGString(seed, color){
+  var rng=mkRng(seed+1);
+  var TYPES=['sine','square','sawtooth','noise','ecg','stepped'];
+  var type=TYPES[seed%TYPES.length];
   var W=400,H=80,mid=H/2,pts=[];
   if(type==='sine'){
     var f=1+(seed%4),amp=20+rng()*12,ph=rng()*Math.PI*2;
-    for(var x=0;x<=W;x+=3) pts.push([x,mid-Math.sin(f*2*Math.PI*x/W+ph)*amp-Math.sin(f*2.7*2*Math.PI*x/W)*amp*.28+(rng()-.5)*2]);
+    for(var x=0;x<=W;x+=3) pts.push(x.toFixed(1)+','+(mid-Math.sin(f*2*Math.PI*x/W+ph)*amp-(Math.sin(f*2.7*2*Math.PI*x/W)*amp*.28)+(rng()-.5)*2).toFixed(1));
   } else if(type==='square'){
     var f=2+(seed%3),amp=18+rng()*10;
-    for(var x=0;x<=W;x+=2){var v=Math.sin(f*2*Math.PI*x/W)>0?1:-1;pts.push([x,mid-v*amp+(rng()-.5)*3]);}
+    for(var x=0;x<=W;x+=2){var v=Math.sin(f*2*Math.PI*x/W)>0?1:-1;pts.push(x+','+(mid-v*amp+(rng()-.5)*3).toFixed(1));}
   } else if(type==='sawtooth'){
     var f=2+(seed%4),amp=18+rng()*10;
-    for(var x=0;x<=W;x+=2){var ph=(x/W*f)%1;pts.push([x,mid-(ph*2-1)*amp+(rng()-.5)*3]);}
+    for(var x=0;x<=W;x+=2){var ph=(x/W*f)%1;pts.push(x+','+(mid-(ph*2-1)*amp+(rng()-.5)*3).toFixed(1));}
   } else if(type==='noise'){
     var prev=mid;
-    for(var x=0;x<=W;x+=3){prev=prev*.65+(mid+(rng()-.5)*46)*.35;pts.push([x,prev]);}
+    for(var x=0;x<=W;x+=3){prev=prev*.65+(mid+(rng()-.5)*46)*.35;pts.push(x+','+prev.toFixed(1));}
   } else if(type==='ecg'){
     for(var x=0;x<=W;x+=2){
       var p=(x%90)/90,y=mid+(rng()-.5)*2;
       if(p>.25&&p<.3)y=mid-30;else if(p>.3&&p<.35)y=mid+12;else if(p>.35&&p<.4)y=mid-6;
-      pts.push([x,y]);
+      pts.push(x+','+y.toFixed(1));
     }
   } else {
     var steps=5+(seed%4),amp=15+rng()*10;
-    for(var x=0;x<=W;x+=2){var st=Math.floor(x/W*steps);pts.push([x,mid-(st%2===0?1:-1)*amp+(rng()-.5)*3]);}
+    for(var x=0;x<=W;x+=2){var st=Math.floor(x/W*steps);pts.push(x+','+(mid-(st%2===0?1:-1)*amp+(rng()-.5)*3).toFixed(1));}
   }
-  return {type:type,pts:pts,color:color,W:W,H:H};
-}
-function waveToSVG(w){
-  var d=w.pts.map(function(p,i){return (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1);}).join(' ');
-  return '<svg viewBox="0 0 '+w.W+' '+w.H+'" preserveAspectRatio="none" width="100%" height="100%"'+
-    ' xmlns="http://www.w3.org/2000/svg"><path d="'+d+'" fill="none" stroke="'+w.color+
-    '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  return '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'+
+         '<polyline points="'+pts.join(' ')+'" fill="none" stroke="'+color+'" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LAZY SVG — load waveform SVGs on demand as rows scroll into the table viewport
-// When lazyWave=false (default) SVGs are rendered immediately (existing behaviour).
-// When lazyWave=true the Signal cell shows a lightweight placeholder; an
-// IntersectionObserver fires when the cell enters the table scroll container and
-// injects the SVG at that point, keeping off-screen rows cheap.
-// ─────────────────────────────────────────────────────────────────────────────
-function waveCell(w, rowId){
-  if(!lazyWave){
-    // eager: return SVG HTML directly
-    return w?'<div style="height:28px">'+waveToSVG(w)+'</div>':'';
-  }
-  // lazy: placeholder div with data attributes; observer will fill it in
-  return '<div class="wave-ph" data-rid="'+rowId+'" style="height:28px;background:#f0f0f0;border-radius:2px"></div>';
-}
-
-function setupLazyObserver(){
-  if(lazyObserver){ lazyObserver.disconnect(); lazyObserver=null; }
-  if(!lazyWave) return;
-  if(!window.IntersectionObserver) return; // graceful fallback for very old browsers
-
-  // root is the Tabulator scroll container
-  var root=document.querySelector('#tabulator .tabulator-tableholder');
-  lazyObserver=new IntersectionObserver(function(entries){
-    entries.forEach(function(entry){
-      if(!entry.isIntersecting) return;
-      var ph=entry.target;
-      if(ph.dataset.filled) return; // already injected
-      var rid=parseInt(ph.dataset.rid,10);
-      var match=allData.filter(function(r){return r.id===rid;})[0];
-      if(match&&match.wave){
-        ph.innerHTML=waveToSVG(match.wave);
-        ph.dataset.filled='1';
-      }
-      lazyObserver.unobserve(ph);
-    });
-  },{root:root,rootMargin:'40px',threshold:0});
-
-  // observe all current placeholders
-  observePlaceholders();
-}
-
-function observePlaceholders(){
-  if(!lazyObserver) return;
-  var phs=document.querySelectorAll('#tabulator .wave-ph:not([data-filled])');
-  phs.forEach(function(ph){ lazyObserver.observe(ph); });
-}
-
-function toggleLazy(checked){
-  lazyWave=checked;
-  // rebuild the Signal column formatter and refresh the table display
-  if(table){
-    // re-render existing rows by calling redisplay; simplest is to invalidate all cells
-    table.getRows().forEach(function(row){
-      var d=row.getData();
-      var cells=row.getCells();
-      // Signal column is index 1
-      if(cells[1]){
-        var w=d.wave;
-        cells[1].getElement().innerHTML=waveCell(w,d.id);
-      }
-    });
-    if(lazyWave) setupLazyObserver();
-    else{ if(lazyObserver){lazyObserver.disconnect();lazyObserver=null;} }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OVERVIEW ZOOM — adjusts ovStart/ovEnd (the overview viewport) independently
-// of the brush selection. ovZoom(factor) zooms around the current centre;
-// factor<1 zooms in (narrower window), factor>1 zooms out (wider window).
-// ─────────────────────────────────────────────────────────────────────────────
-function ovZoom(factor){
-  var centre=(ovStart+ovEnd)/2;
-  var hw=(ovEnd-ovStart)*factor/2;
-  hw=Math.min(0.5,Math.max(0.01,hw)); // clamp: min 2% of total range, max 100%
-  ovStart=Math.max(0,centre-hw);
-  ovEnd  =Math.min(1,centre+hw);
-  if(ovEnd-ovStart<0.02){ ovEnd=Math.min(1,ovStart+0.02); }
-  syncOvZoomUI();
-  redraw();
-}
-
-function ovReset(){
-  ovStart=0; ovEnd=1;
-  syncOvZoomUI();
-  redraw();
-}
-
-function ovZoomSlide(val){
-  // slider 1–50 maps to zoom level: 1=full range, 50=2% of range
-  var level=parseFloat(val);
-  var width=1/level;                  // fraction of globalSpan visible in overview
-  width=Math.min(1,Math.max(0.02,width));
-  var centre=(ovStart+ovEnd)/2;
-  ovStart=Math.max(0,centre-width/2);
-  ovEnd  =Math.min(1,ovStart+width);
-  if(ovEnd>1){ovEnd=1;ovStart=Math.max(0,1-width);}
-  syncOvZoomUI();
-  redraw();
-}
-
-function syncOvZoomUI(){
-  var width=ovEnd-ovStart;
-  var level=Math.round(1/width);
-  document.getElementById('ovZoomLbl').textContent=level+'x';
-  var slider=document.getElementById('ovZoomSlider');
-  slider.value=Math.min(50,Math.max(1,level));
-}
-// ─────────────────────────────────────────────────────────────────────────────
-function buildDemo(){
-  var LEVELS=['INFO','INFO','WARN','ERROR','INFO','WARN'];
-  var CHANS=['ch-1','ch-2','ch-3','ch-4'], TYPES=['metric','log','trace','alert'];
-  var rng=mkRng(7),rows=[],t=new Date('2024-03-01T08:00:00Z').getTime();
-  for(var i=0;i<150;i++){
-    var dur=(15+rng()*300)*60000;
-    rows.push({id:i+1,timestamp:new Date(t).toISOString(),end_time:new Date(t+dur).toISOString(),
-      channel:CHANS[i%4],level:LEVELS[i%6],type:TYPES[i%4],
-      label:'seg-'+('00'+(i+1)).slice(-3),wave:makeWave(i,PAL[i%PAL.length])});
-    t+=dur+(8+rng()*120)*60000;
-  }
-  return rows;
-}
-// ─────────────────────────────────────────────────────────────────────────────
-// COLLAPSIBLE DETAIL
-// ─────────────────────────────────────────────────────────────────────────────
-function toggleDetail(){
-  detailOpen=!detailOpen;
-  document.getElementById('detBody').style.maxHeight=detailOpen?'200px':'0';
-  document.getElementById('detCaret').innerHTML=detailOpen?'&#9660;':'&#9654;';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TABULATOR
-// ─────────────────────────────────────────────────────────────────────────────
-function snapshotPage(){
-  if(!table) return;
-  try{
-    var active=table.getData('active');
-    var ps=table.getPageSize(),pg=table.getPage();
-    var sl=active.slice((pg-1)*ps,pg*ps);
-    pageIds={};sl.forEach(function(r){pageIds[r.id]=1;});
-  }catch(e){pageIds={};}
-}
-
-function levelBadge(v){
-  var m={'ERROR':'danger','WARN':'warning','INFO':'default'};
-  return '<span class="label label-'+(m[v]||'default')+'" style="font-size:10px">'+v+'</span>';
-}
-
-// FIX 5: apply focused-row highlight after table data settles
-function applyFocusHighlight(){
-  if(!table||!focusedId) return;
-  try{
-    table.getRows().forEach(function(r){r.getElement().classList.remove('row-focused');});
-    var found=table.getRows().filter(function(r){return r.getData().id===focusedId;});
-    if(found.length) found[0].getElement().classList.add('row-focused');
-  }catch(ex){}
-}
-
-function initTable(data){
-  if(typeof Tabulator==='undefined'){showErr('Tabulator failed to load');return;}
-  table=new Tabulator('#tabulator',{
-    data:data,height:'460px',layout:'fitColumns',
-    pagination:'local',paginationSize:25,paginationSizeSelector:[10,25,50,100],
-    columns:[
-      {title:'#',      field:'id',        width:50,hozAlign:'right'},
-      {title:'Signal', width:110,formatter:function(cell){
-        var d=cell.getRow().getData();
-        return waveCell(d.wave,d.id);
-      }},
-      {title:'Level',  field:'level',     width:78,formatter:function(cell){return levelBadge(cell.getValue());}},
-      {title:'Channel',field:'channel',   width:88},
-      {title:'Type',   field:'type',      width:74},
-      {title:'Label',  field:'label',     width:90},
-      {title:'Start',  field:'timestamp', width:128,formatter:function(cell){return fmtD(new Date(cell.getValue()).getTime());}},
-      {title:'Dur',    width:58,formatter:function(cell){var r=cell.getRow().getData();return fmtS(r._te-r._ts);}},
-      {title:'In view',formatter:function(cell){
-        var r=cell.getRow().getData();
-        var vs=globalMin+viewStart*globalSpan,ve=globalMin+viewEnd*globalSpan,sp=ve-vs||1;
-        var l=((Math.max(r._ts,vs)-vs)/sp*100).toFixed(1);
-        var w=Math.max(0.3,(Math.min(r._te,ve)-Math.max(r._ts,vs))/sp*100).toFixed(1);
-        return '<div style="height:10px;background:#eee;border-radius:2px;overflow:hidden;position:relative;margin:3px 0">'+
-               '<div style="position:absolute;left:'+l+'%;width:'+w+'%;height:100%;background:'+rowColor(r)+'"></div></div>';
-      }}
-    ],
-    pageLoaded:function(){
-      snapshotPage();
-      setTimeout(function(){
-        applyFocusHighlight();
-        if(lazyWave) setupLazyObserver(); // re-observe after page rebuild
-      }, 50);
-      if(scope==='page') redraw();
-    }
+// build demo rows — note wave_svg is a plain SVG *string* stored in the row
+var PAL=['#337ab7','#f0ad4e','#d9534f','#5cb85c','#9b59b6','#e67e22','#1abc9c','#e91e63'];
+var LEVELS=['INFO','INFO','WARN','ERROR','INFO','WARN'];
+var CHANS=['ch-1','ch-2','ch-3','ch-4'];
+var rng=mkRng(7), rows=[], t=new Date('2024-03-01T08:00:00Z').getTime();
+for(var i=0;i<150;i++){
+  var dur=(15+rng()*300)*60000;
+  rows.push({
+    id        : i+1,
+    timestamp : new Date(t).toISOString(),
+    end_time  : new Date(t+dur).toISOString(),
+    channel   : CHANS[i%4],
+    level     : LEVELS[i%6],
+    label     : 'seg-'+('00'+(i+1)).slice(-3),
+    wave_svg  : makeSVGString(i, PAL[i%PAL.length])  // SVG string — source of truth
   });
-
-  // Wire row click via table.on() — more reliable than the constructor option in Tabulator 6
-  table.on('rowClick', function(e, row){
-    var d=row.getData();
-    focusedId=d.id;
-    // zoom view window around this row with 30% padding each side
-    var pad=(d._te-d._ts)*0.3;
-    viewStart=Math.max(0,(d._ts-pad-globalMin)/globalSpan);
-    viewEnd  =Math.min(1,(d._te+pad-globalMin)/globalSpan);
-    // ensure overview window contains the brush midpoint
-    var mid=(viewStart+viewEnd)/2, ow=ovEnd-ovStart;
-    if(mid<ovStart||mid>ovEnd){
-      ovStart=Math.max(0,mid-ow/2);
-      ovEnd=Math.min(1,ovStart+ow);
-      if(ovEnd>1){ovEnd=1;ovStart=Math.max(0,1-ow);}
-    }
-    // open detail panel if collapsed
-    if(!detailOpen) toggleDetail();
-    // redraw canvases — focus ring appears immediately
-    redraw();
-    // highlight row directly — DOM row still exists, no setData teardown
-    applyFocusHighlight();
-  });
+  t+=dur+(8+rng()*120)*60000;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SCOPE TOGGLE
-// FIX 4: "All data" resets the view to the full time range AND reloads table
-// with all filtered rows (not just the currently-in-view subset).
-// ─────────────────────────────────────────────────────────────────────────────
-function setScope(s){
-  scope=s;
-  document.getElementById('btnAll').className ='btn btn-default btn-sm'+(s==='all'?' btn-scope-on':'');
-  document.getElementById('btnPage').className='btn btn-default btn-sm'+(s==='page'?' btn-scope-on':'');
-  if(s==='all'){
-    // reset both the view window and the overview window to full range
-    viewStart=0; viewEnd=1;
-    ovStart=0;   ovEnd=1;
-    focusedId=null;
-    redraw(); // draw immediately so canvases update
-    if(busy||!table) return;
-    busy=true;
-    // load ALL filtered rows (not just inView, which would be the same as all when viewStart=0,viewEnd=1 anyway)
-    table.setData(getFiltered()).then(function(){busy=false;snapshotPage();redraw();}).catch(function(e){busy=false;showErr(String(e));});
-  } else {
-    redraw();
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SELECTION INFO BAR + BRUSH TOOLTIP
-// ─────────────────────────────────────────────────────────────────────────────
-function updateSelectionInfo(){
-  var vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
-  document.getElementById('selFrom').textContent=fmtD(vs);
-  document.getElementById('selTo').textContent  =fmtD(ve);
-  document.getElementById('selSpan').textContent=fmtS(ve-vs);
-  document.getElementById('brushTip').textContent=fmtD(vs)+' \u2192 '+fmtD(ve)+' ('+fmtS(ve-vs)+')';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HANDLE DRAWING
-// ─────────────────────────────────────────────────────────────────────────────
-function rrect(ctx,x,y,w,h,r){
-  ctx.beginPath();
-  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
-}
-function drawHandle(ctx,cx,cy){
-  var HW=11,HH=22,R=4;
-  ctx.save();
-  ctx.shadowColor='rgba(0,0,0,0.2)';ctx.shadowBlur=4;
-  ctx.fillStyle='#fff';rrect(ctx,cx-HW/2,cy-HH/2,HW,HH,R);ctx.fill();
-  ctx.shadowBlur=0;
-  ctx.strokeStyle='#337ab7';ctx.lineWidth=1.5;rrect(ctx,cx-HW/2,cy-HH/2,HW,HH,R);ctx.stroke();
-  ctx.strokeStyle='#aaa';ctx.lineWidth=1;
-  [-4,0,4].forEach(function(dy){ctx.beginPath();ctx.moveTo(cx-3,cy+dy);ctx.lineTo(cx+3,cy+dy);ctx.stroke();});
-  ctx.restore();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OVERVIEW CANVAS
-// FIX 2: rows drawn as true horizontal bands — Y computed with Math.round(i * slotH)
-// so there is zero floating-point drift across 150 rows.
-// The overview can scroll (ovStart/ovEnd) to show any portion of the full time range.
-// ─────────────────────────────────────────────────────────────────────────────
-function drawOverview(){
-  var cv=document.getElementById('ovCanvas');
-  var W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=80;
-  var ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,80);
-
-  var DTOP=4, DBOT=58, DH=DBOT-DTOP; // pixel band for data rows
-  var n=allData.length;
-  // slotH = exact floating slot height per row; we round per-row to get pixel Y.
-  // This means each row's Y is independent — no accumulation of error.
-  var slotH=DH/n;
-  // visual bar height: at least 1px, capped at 4px so dense data stays readable
-  var barH=Math.max(1,Math.min(4,Math.floor(slotH)));
-
-  var filtered=getFiltered(), filteredSet={}, scopedSet={};
-  filtered.forEach(function(r){filteredSet[r.id]=1;});
-  if(scope==='page'&&Object.keys(pageIds).length){
-    filtered.forEach(function(r){if(pageIds[r.id])scopedSet[r.id]=1;});
-  } else {
-    filtered.forEach(function(r){scopedSet[r.id]=1;});
-  }
-
-  allData.forEach(function(r,i){
-    var f1=gFrac(r._ts), f2=gFrac(r._te);
-    // skip rows entirely outside the overview viewport
-    if(f2<ovStart||f1>ovEnd) return;
-    var x1=Math.max(0,fracToOvPx(f1));
-    var x2=Math.min(W,fracToOvPx(f2));
-    if(x2<x1+2) x2=x1+2; // minimum 2px width so every row is visible
-    // FIX 2: independent Y per row — no accumulation
-    var y=DTOP+Math.round(i*slotH);
-    if(y+barH>DBOT) return;
-    if(scopedSet[r.id])        ctx.fillStyle=rowColor(r)+'cc';
-    else if(filteredSet[r.id]) ctx.fillStyle=rowColor(r)+'40';
-    else                       ctx.fillStyle='#ccc';
-    ctx.fillRect(x1,y,x2-x1,barH);
-  });
-
-  // brush selection overlay
-  var bx1=Math.max(0,fracToOvPx(viewStart));
-  var bx2=Math.min(W,fracToOvPx(viewEnd));
-  ctx.fillStyle='rgba(51,122,183,0.10)';
-  ctx.fillRect(bx1,0,bx2-bx1,80);
-  // brush edge lines
-  ctx.strokeStyle='#337ab7';ctx.lineWidth=2;
-  ctx.beginPath();ctx.moveTo(bx1,0);ctx.lineTo(bx1,80);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(bx2,0);ctx.lineTo(bx2,80);ctx.stroke();
-  // FIX 1: grab handles drawn on canvas at each brush edge
-  drawHandle(ctx,bx1,40);
-  drawHandle(ctx,bx2,40);
-
-  // keep the invisible #brush div aligned for tooltip positioning
-  var br=document.getElementById('brush');
-  br.style.left=bx1+'px';br.style.width=Math.max(8,bx2-bx1)+'px';
-  br.style.top='0';br.style.height='80px';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DETAIL CANVAS
-// ─────────────────────────────────────────────────────────────────────────────
-function drawDetail(){
-  var cv=document.getElementById('detCanvas');
-  var W=cv.parentElement.clientWidth||900; cv.width=W; cv.height=80;
-  var ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,80);
-  var vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan, sp=ve-vs||1;
-  function toX(ts){return Math.round((ts-vs)/sp*W);}
-  // subtle grid
-  ctx.strokeStyle='#ececec';ctx.lineWidth=1;
-  [1,2,3].forEach(function(i){ctx.beginPath();ctx.moveTo(W/4*i,0);ctx.lineTo(W/4*i,80);ctx.stroke();});
-  getScopedRows().forEach(function(r){
-    if(!inView(r)) return;
-    var x1=Math.max(0,toX(r._ts)), x2=Math.min(W,Math.max(x1+4,toX(r._te)));
-    var c=rowColor(r), seg=x2-x1;
-    ctx.fillStyle=c+'22';ctx.fillRect(x1,4,seg,72);
-    ctx.fillStyle=c+'cc';ctx.fillRect(x1,4,2,72);
-    if(r.wave&&seg>12){
-      ctx.save();ctx.beginPath();ctx.rect(x1,4,seg,72);ctx.clip();
-      ctx.strokeStyle=c+'bb';ctx.lineWidth=1.2;ctx.beginPath();
-      r.wave.pts.forEach(function(p,ii){
-        var nx=x1+p[0]/r.wave.W*seg, ny=4+p[1]/r.wave.H*72;
-        ii===0?ctx.moveTo(nx,ny):ctx.lineTo(nx,ny);
-      });
-      ctx.stroke();ctx.restore();
-    }
-    // FIX 5: amber focus ring around the currently-focused row
-    if(r.id===focusedId){
-      ctx.save();
-      ctx.strokeStyle='#f0ad4e';ctx.lineWidth=2.5;
-      ctx.strokeRect(x1+1,5,x2-x1-2,70);
-      ctx.restore();
-    }
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AXIS LABELS + STATS
-// ─────────────────────────────────────────────────────────────────────────────
-function updateAxisLabels(){
-  var vs=globalMin+viewStart*globalSpan, ve=globalMin+viewEnd*globalSpan;
-  var ots=globalMin+ovStart*globalSpan,  ote=globalMin+ovEnd*globalSpan;
-  document.getElementById('ovL').textContent=fmtD(ots);
-  document.getElementById('ovM').textContent=fmtD((ots+ote)/2);
-  document.getElementById('ovR').textContent=fmtD(ote);
-  document.getElementById('detL').textContent=fmtD(vs);
-  document.getElementById('detM').textContent=fmtD((vs+ve)/2);
-  document.getElementById('detR').textContent=fmtD(ve);
-}
-function redraw(){
-  drawOverview();
-  drawDetail();
-  updateAxisLabels();
-  updateSelectionInfo();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TABLE REFRESH
-// ─────────────────────────────────────────────────────────────────────────────
-function refreshTable(){
-  if(busy||!table) return;
-  busy=true;
-  table.setData(getVisible()).then(function(){
-    busy=false;snapshotPage();redraw();applyFocusHighlight();
-  }).catch(function(e){busy=false;showErr(String(e));});
-}
-function updateAll(){redraw();refreshTable();}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BRUSH MOUSE INTERACTION
-//
-// FIX 1: resize mode is ONLY triggered when the mouse is within HANDLE_PX pixels
-// of a brush edge line.  Anywhere else inside the brush body → pan mode.
-// The cursor changes on hover to telegraph the mode to the user.
-//
-// FIX 3: when the mouse (during a drag) is within 5% of either edge of the
-// overview canvas, the overview viewport (ovStart/ovEnd) scrolls automatically,
-// allowing the brush to be dragged all the way to the full data extents.
-// ─────────────────────────────────────────────────────────────────────────────
-var bActive=false, bMode=null, bAnchorFrac=0, bsSnap=0, beSnap=0;
-var edgeRAF=null;
-var EDGE_ZONE=0.05, SCROLL_SPD=0.006;
-var ovWrapEl=document.getElementById('ovWrap');
-
-function stopEdgeScroll(){if(edgeRAF){cancelAnimationFrame(edgeRAF);edgeRAF=null;}}
-function startEdgeScroll(dir){
-  stopEdgeScroll();
-  function step(){
-    var ow=ovEnd-ovStart;
-    ovStart=Math.max(0,Math.min(1-ow,ovStart+dir*SCROLL_SPD));
-    ovEnd=ovStart+ow;
-    redraw();
-    edgeRAF=requestAnimationFrame(step);
-  }
-  edgeRAF=requestAnimationFrame(step);
-}
-
-// live cursor update on hover (no drag active)
-ovWrapEl.addEventListener('mousemove',function(e){
-  if(bActive) return;
-  var px=mouseToOvPx(e);
-  var bx1=fracToOvPx(viewStart), bx2=fracToOvPx(viewEnd);
-  var gf=ovPxToFrac(px);
-  if(Math.abs(px-bx1)<HANDLE_PX||Math.abs(px-bx2)<HANDLE_PX){
-    ovWrapEl.className='cur-ew';      // near a handle → resize cursor
-  } else if(gf>viewStart&&gf<viewEnd){
-    ovWrapEl.className='cur-grab';    // inside brush body → pan cursor
-  } else {
-    ovWrapEl.className='';            // outside → default crosshair from CSS
-  }
-});
-ovWrapEl.addEventListener('mouseleave',function(){if(!bActive)ovWrapEl.className='';});
-
-ovWrapEl.addEventListener('mousedown',function(e){
-  var px=mouseToOvPx(e);
-  var gf=ovPxToFrac(px);
-  var bx1=fracToOvPx(viewStart), bx2=fracToOvPx(viewEnd);
-
-  // FIX 1: pixel-precise hit detection for handles
-  if(Math.abs(px-bx1)<HANDLE_PX){
-    bMode='L';                           // resize left edge
-  } else if(Math.abs(px-bx2)<HANDLE_PX){
-    bMode='R';                           // resize right edge
-  } else if(gf>viewStart&&gf<viewEnd){
-    bMode='M'; bAnchorFrac=gf; bsSnap=viewStart; beSnap=viewEnd;  // pan whole brush
-  } else {
-    bMode='N'; bAnchorFrac=gf; viewStart=gf; viewEnd=gf+.001;     // draw new selection
-  }
-  bActive=true;
-  ovWrapEl.className=(bMode==='L'||bMode==='R')?'cur-ew':'cur-grabbing';
-  e.preventDefault();
+// ── build the Tabulator table ─────────────────────────────────────────────────
+var table=new Tabulator('#demo-table',{
+  data     : rows,
+  height   : '420px',
+  layout   : 'fitColumns',
+  pagination      : 'local',
+  paginationSize  : 25,
+  paginationSizeSelector:[10,25,50,100],
+  columns:[
+    {title:'#',       field:'id',        width:54, hozAlign:'right'},
+    {title:'Signal',  field:'wave_svg',  width:120, formatter:function(cell){
+      // render the SVG string directly — the widget reads this same field
+      var svg=cell.getValue()||'';
+      return '<div style="height:30px;overflow:hidden">'+svg+'</div>';
+    }},
+    {title:'Level',   field:'level',     width:80, formatter:function(cell){
+      var m={'ERROR':'danger','WARN':'warning','INFO':'default'};
+      return '<span class="label label-'+(m[cell.getValue()]||'default')+'">'+cell.getValue()+'</span>';
+    }},
+    {title:'Channel', field:'channel',   width:90},
+    {title:'Label',   field:'label',     width:90},
+    {title:'Start',   field:'timestamp', width:140, formatter:function(cell){
+      return new Date(cell.getValue()).toLocaleString('en-GB',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    }},
+    {title:'Dur', width:64, formatter:function(cell){
+      var r=cell.getRow().getData();
+      var ms=new Date(r.end_time).getTime()-new Date(r.timestamp).getTime();
+      if(ms<60000) return Math.round(ms)+'ms';
+      if(ms<3600000) return Math.round(ms/60000)+'m';
+      return (ms/3600000).toFixed(1)+'h';
+    }}
+  ]
 });
 
-document.addEventListener('mousemove',function(e){
-  if(!bActive) return;
-  var px=mouseToOvPx(e);
-  var gf=ovPxToFrac(px);
-  var w=viewEnd-viewStart;
-
-  if(bMode==='L')      viewStart=Math.max(0,Math.min(viewEnd-.005,gf));
-  else if(bMode==='R') viewEnd  =Math.min(1,Math.max(viewStart+.005,gf));
-  else if(bMode==='M'){var d=gf-bAnchorFrac;viewStart=Math.max(0,Math.min(1-w,bsSnap+d));viewEnd=viewStart+w;}
-  else                {viewStart=Math.min(bAnchorFrac,gf);viewEnd=Math.max(bAnchorFrac,gf)+.001;}
-
-  // FIX 3: raw canvas fraction for edge-scroll detection
-  var rawPct=px/ovW();
-  if(rawPct<EDGE_ZONE&&ovStart>0)        startEdgeScroll(-1);
-  else if(rawPct>(1-EDGE_ZONE)&&ovEnd<1) startEdgeScroll(1);
-  else                                   stopEdgeScroll();
-
-  redraw(); // fast canvas-only update while dragging
+// ── attach the TimelineWidget ─────────────────────────────────────────────────
+var timeline=new TimelineWidget({
+  tableId    : '#demo-table',
+  containerId: '#timeline-container',
+  timeStart  : 'timestamp',
+  timeEnd    : 'end_time',
+  waveform   : 'wave_svg',    // field containing the SVG string
+  label      : 'label'
 });
-
-document.addEventListener('mouseup',function(){
-  if(bActive){
-    bActive=false;
-    stopEdgeScroll();
-    ovWrapEl.className='';
-    updateAll(); // reload table on release
-  }
-});
-
-// scroll wheel zooms the overview viewport around the cursor
-ovWrapEl.addEventListener('wheel',function(e){
-  e.preventDefault();
-  var px=mouseToOvPx(e);
-  var pivot=ovPxToFrac(px);
-  var factor=e.deltaY>0?1.3:0.77;
-  var ow=ovEnd-ovStart, nw=Math.min(1,Math.max(0.02,ow*factor));
-  var ratio=(pivot-ovStart)/ow;
-  ovStart=Math.max(0,pivot-ratio*nw);
-  ovEnd=Math.min(1,ovStart+nw);
-  if(ovEnd>1){ovEnd=1;ovStart=Math.max(0,1-nw);}
-  syncOvZoomUI();
-  redraw();
-},{passive:false});
-
-// click detail canvas → zoom into that segment
-document.getElementById('detCanvas').addEventListener('click',function(e){
-  var cv=document.getElementById('detCanvas'),rc=cv.getBoundingClientRect();
-  var ts=(globalMin+viewStart*globalSpan)+((e.clientX-rc.left)/rc.width)*(viewEnd-viewStart)*globalSpan;
-  var hit=getVisible().filter(function(r){return r._ts<=ts&&r._te>=ts;});
-  if(hit.length){
-    var s=hit[0],pad=(s._te-s._ts)*.2;
-    viewStart=Math.max(0,(s._ts-pad-globalMin)/globalSpan);
-    viewEnd  =Math.min(1,(s._te+pad-globalMin)/globalSpan);
-    focusedId=s.id;
-    updateAll();
-  }
-});
-
-function doZoom(f){var m=(viewStart+viewEnd)/2,h=(1/f)/2;viewStart=Math.max(0,m-h);viewEnd=Math.min(1,m+h);updateAll();}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// INIT
-// ─────────────────────────────────────────────────────────────────────────────
-function init(){
-  try{
-    var raw=buildDemo();
-    allData=raw.map(function(r){
-      return Object.assign({},r,{_ts:new Date(r.timestamp).getTime(),_te:new Date(r.end_time).getTime()});
-    }).sort(function(a,b){return a._ts-b._ts;});
-    globalMin=allData[0]._ts;
-    globalMax=Math.max.apply(null,allData.map(function(r){return r._te;}));
-    globalSpan=globalMax-globalMin||1;
-    ovStart=0; ovEnd=1;
-    syncOvZoomUI();
-    document.getElementById('hdrSpan').textContent=fmtD(globalMin)+' \u2192 '+fmtD(globalMax);
-    initTable(allData);
-    requestAnimationFrame(function(){requestAnimationFrame(function(){snapshotPage();redraw();});});
-  }catch(e){showErr(String(e));}
-}
-setTimeout(init,200);
 </script>
+
 </body>
 </html>
