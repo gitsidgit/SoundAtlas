@@ -14,7 +14,7 @@ var CSS='\
 .tlw-cur-grab{cursor:grab}\
 .tlw-cur-grabbing{cursor:grabbing}\
 .tlw-brush{position:absolute;top:0;height:100%;pointer-events:none;background:rgba(51,122,183,0.07)}\
-.tlw-vbrush{position:absolute;left:0;width:100%;pointer-events:none;background:rgba(51,122,183,0.07);border-top:2px solid #337ab7;border-bottom:2px solid #337ab7;box-sizing:border-box}\
+.tlw-vbrush{position:absolute;pointer-events:none;background:rgba(100,149,200,0.06);border-top:1px solid rgba(100,149,200,0.35);border-bottom:1px solid rgba(100,149,200,0.35);box-sizing:border-box}\
 .tlw-tip{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);\
   background:rgba(0,0,0,.7);color:#fff;font-size:9px;padding:2px 7px;\
   border-radius:3px;white-space:nowrap;pointer-events:none}\
@@ -83,10 +83,12 @@ function TimelineWidget(cfg){
   this.HPIX      = 16;
   this.MIN_BRUSH = 0.02;
   this.MIN_EDGE  = 0.02;
+  this.OV_PAD    = 20; // px reserved each side of canvas for time-brush handles
 
   // Vertical focus state
   this.focusY = 0.5; // 0..1 fraction of overview height
   this.channels = [];
+  this.showLaneVbrush = true; // toggled by checkbox
 
   this._buildDOM();
   this._bindDOM();
@@ -100,7 +102,7 @@ TimelineWidget.prototype._buildDOM=function(){
     '<div class="tlw" id="'+uid+'">',
     '<div style="margin-bottom:4px">',
     '  <span class="tlw-sec">Overview</span>',
-    '  <span class="tlw-hint">drag brush (time) · drag lane bar (snaps to swim lane) · scroll zooms</span>',
+    '  <span class="tlw-hint">drag brush · drag lane bar (snaps to swim lane) · click segment · scroll zooms</span>',
     '</div>',
     '<div class="tlw-ov-wrap tlw-cur-default" id="'+uid+'_ov">',
     '  <canvas id="'+uid+'_ovc" height="80"></canvas>',
@@ -155,6 +157,9 @@ TimelineWidget.prototype._buildDOM=function(){
     '  </div>',
     '  <label style="font-size:11px;color:#555;margin:0 0 0 6px;cursor:pointer">',
     '    <input type="checkbox" id="'+uid+'_lazy"'+(this.lazyWave?' checked':'')+'>&nbsp;Lazy waveforms',
+    '  </label>',
+    '  <label style="font-size:11px;color:#555;margin:0 0 0 6px;cursor:pointer" id="'+uid+'_vbrlbl">',
+    '    <input type="checkbox" id="'+uid+'_vbrchk" checked>&nbsp;Lane brush',
     '  </label>',
     '  <button class="btn btn-default btn-xs" id="'+uid+'_bench" style="margin-left:6px">&#9654; Benchmark</button>',
     '</div>',
@@ -294,8 +299,15 @@ TimelineWidget.prototype._color=function(r){
 };
 
 TimelineWidget.prototype._ovW=function(){ return this._el('ov').clientWidth||900; };
-TimelineWidget.prototype._f2px=function(f){ return Math.round((f-this.oS)/(this.oE-this.oS)*this._ovW()); };
-TimelineWidget.prototype._px2f=function(px){ return this.oS+(px/this._ovW())*(this.oE-this.oS); };
+// Map a global fraction to a canvas pixel, respecting OV_PAD margins
+TimelineWidget.prototype._f2px=function(f){
+  var pad=this.OV_PAD, W=this._ovW();
+  return Math.round(pad+(f-this.oS)/(this.oE-this.oS)*(W-pad*2));
+};
+TimelineWidget.prototype._px2f=function(px){
+  var pad=this.OV_PAD, W=this._ovW();
+  return this.oS+((px-pad)/(W-pad*2))*(this.oE-this.oS);
+};
 TimelineWidget.prototype._mPx=function(e){
   var rc=this._el('ov').getBoundingClientRect();
   return Math.max(0,Math.min(rc.width,e.clientX-rc.left));
@@ -329,11 +341,12 @@ TimelineWidget.prototype._drawOv=function(){
   var laneCount = this.channels.length || 1;
   var slotH = DH / laneCount;
   var barH = Math.min(slotH * 0.8, 6);
+  var pad = this.OV_PAD;
 
   this.rows.forEach(function(r){
     var f1=self._gf(r.ts), f2=self._gf(r.te);
     if(f2<self.oS||f1>self.oE) return;
-    var x1=Math.max(0,self._f2px(f1)), x2=Math.min(W,self._f2px(f2));
+    var x1=Math.max(pad,self._f2px(f1)), x2=Math.min(W-pad,self._f2px(f2));
     if(x2<x1+2) x2=x1+2;
 
     var laneIdx = self.channels.indexOf(r.raw.channel);
@@ -344,37 +357,52 @@ TimelineWidget.prototype._drawOv=function(){
   });
 
   // Time Brush
-  var bx1=Math.max(0,this._f2px(this.vS)), bx2=Math.min(W,this._f2px(this.vE));
+  var bx1=Math.max(pad,this._f2px(this.vS)), bx2=Math.min(W-pad,this._f2px(this.vE));
   ctx.fillStyle='rgba(51,122,183,0.1)'; ctx.fillRect(bx1,0,bx2-bx1,80);
   ctx.strokeStyle='#337ab7'; ctx.lineWidth=2;
   ctx.beginPath(); ctx.moveTo(bx1,0); ctx.lineTo(bx1,80); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(bx2,0); ctx.lineTo(bx2,80); ctx.stroke();
   this._drawHandle(ctx,bx1,40); this._drawHandle(ctx,bx2,40);
 
-  // Vertical lane-focus brush — drawn as a horizontal band matching the focused swim lane
+  var br=this._el('br');
+  br.style.left=bx1+'px'; br.style.width=Math.max(8,bx2-bx1)+'px';
+  br.style.top='0'; br.style.height='80px';
+
+  // Lane-focus brush — only when: enabled, and more than one lane
+  var vbr=this._el('vbr');
+  var showVB = this.showLaneVbrush && laneCount > 1;
+  if(!showVB){
+    vbr.style.display='none';
+    // Also hide the label so it doesn't clutter single-lane views
+    var lbl=this._el('vbrlbl'); if(lbl) lbl.style.display= laneCount<=1 ? 'none':'';
+    return;
+  }
+  var lbl=this._el('vbrlbl'); if(lbl) lbl.style.display='';
+
   var focusedLane=Math.floor(this.focusY*laneCount);
   focusedLane=Math.max(0,Math.min(laneCount-1,focusedLane));
   var fy1=TOP+focusedLane*slotH, fy2=fy1+slotH;
   var fyCtr=(fy1+fy2)/2;
 
-  // Shaded band
-  ctx.fillStyle='rgba(51,122,183,0.10)';
+  // Shaded band — subtle tint only
+  ctx.fillStyle='rgba(100,149,200,0.08)';
   ctx.fillRect(0,fy1,W,fy2-fy1);
-  // Top and bottom border lines
-  ctx.strokeStyle='#337ab7'; ctx.lineWidth=1.5;
+  // Dashed top and bottom border lines — lighter than time brush
+  ctx.save();
+  ctx.strokeStyle='rgba(100,149,200,0.5)'; ctx.lineWidth=1;
+  ctx.setLineDash([4,3]);
   ctx.beginPath(); ctx.moveTo(0,fy1); ctx.lineTo(W,fy1); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(0,fy2); ctx.lineTo(W,fy2); ctx.stroke();
-  // Drag handles — one on each side edge, centred vertically in the lane
-  this._drawHHandle(ctx, 6,        fyCtr, slotH);
-  this._drawHHandle(ctx, W-6,      fyCtr, slotH);
+  ctx.setLineDash([]);
+  ctx.restore();
+  // Handles — same pill shape, muted colour
+  this._drawHHandle(ctx, pad/2, fyCtr, slotH);
+  this._drawHHandle(ctx, W-pad/2, fyCtr, slotH);
 
-  // Sync DOM overlay (used for the ns-resize cursor hotspot detection only)
-  var vbr=this._el('vbr');
+  // Sync DOM overlay
+  vbr.style.display='';
+  vbr.style.left=pad+'px'; vbr.style.width=(W-pad*2)+'px';
   vbr.style.top=fy1+'px'; vbr.style.height=(fy2-fy1)+'px';
-
-  var br=this._el('br');
-  br.style.left=bx1+'px'; br.style.width=Math.max(8,bx2-bx1)+'px';
-  br.style.top='0'; br.style.height='80px';
 };
 
 TimelineWidget.prototype._drawDet=function(){
@@ -519,11 +547,11 @@ TimelineWidget.prototype._drawHHandle=function(ctx,cx,cy,laneH){
     ctx.lineTo(xl,yt+R); ctx.quadraticCurveTo(xl,yt,xl+R,yt); ctx.closePath();
   }
   ctx.save();
-  ctx.shadowColor='rgba(0,0,0,0.18)'; ctx.shadowBlur=4;
+  ctx.shadowColor='rgba(0,0,0,0.12)'; ctx.shadowBlur=3;
   ctx.fillStyle='#fff'; rr(); ctx.fill(); ctx.shadowBlur=0;
-  ctx.strokeStyle='#337ab7'; ctx.lineWidth=1.5; rr(); ctx.stroke();
+  ctx.strokeStyle='rgba(100,149,200,0.7)'; ctx.lineWidth=1; rr(); ctx.stroke();
   // Vertical griplines
-  ctx.strokeStyle='#aaa'; ctx.lineWidth=1;
+  ctx.strokeStyle='#bbb'; ctx.lineWidth=1;
   [-4,0,4].forEach(function(dx){
     ctx.beginPath(); ctx.moveTo(cx+dx,cy-3); ctx.lineTo(cx+dx,cy+3); ctx.stroke();
   });
@@ -719,6 +747,10 @@ TimelineWidget.prototype._bindDOM=function(){
     self.lazyWave=this.checked;
     self._draw();
   });
+  this._el('vbrchk').addEventListener('change',function(){
+    self.showLaneVbrush=this.checked;
+    self._draw();
+  });
   this._el('zin')   .addEventListener('click',function(){ self._ovZoom(0.5); });
   this._el('zout')  .addEventListener('click',function(){ self._ovZoom(2);   });
   this._el('zfull') .addEventListener('click',function(){ self._ovFull();    });
@@ -735,17 +767,19 @@ TimelineWidget.prototype._bindDOM=function(){
     else if(gf>self.vS&&gf<self.vE)
       ov.className='tlw-ov-wrap tlw-cur-grab';
     else {
-        // Check if we are near the top or bottom edge of the focused lane band
+        // Check if we are near the lane brush band — only when visible
         var nLanes=self.channels.length||1;
-        var slotH2=(75-5)/nLanes;
-        var focLane=Math.floor(self.focusY*nLanes);
-        focLane=Math.max(0,Math.min(nLanes-1,focLane));
-        var fy1=5+focLane*slotH2, fy2=fy1+slotH2;
-        var ry2 = e.clientY - ov.getBoundingClientRect().top;
-        if(Math.abs(ry2-fy1)<self.HPIX||Math.abs(ry2-fy2)<self.HPIX||
-           (ry2>fy1&&ry2<fy2))
-          ov.className='tlw-ov-wrap tlw-cur-ns';
-        else ov.className='tlw-ov-wrap tlw-cur-default';
+        if(self.showLaneVbrush && nLanes>1){
+          var slotH2=(75-5)/nLanes;
+          var focLane=Math.floor(self.focusY*nLanes);
+          focLane=Math.max(0,Math.min(nLanes-1,focLane));
+          var fy1=5+focLane*slotH2, fy2=fy1+slotH2;
+          var ry2 = e.clientY - ov.getBoundingClientRect().top;
+          if(ry2>=fy1-2&&ry2<=fy2+2){
+            ov.className='tlw-ov-wrap tlw-cur-ns'; return;
+          }
+        }
+        ov.className='tlw-ov-wrap tlw-cur-default';
     }
   });
   ov.addEventListener('mouseleave',function(){ if(!self.drag) ov.className='tlw-ov-wrap tlw-cur-default'; });
@@ -754,19 +788,23 @@ TimelineWidget.prototype._bindDOM=function(){
     var bx1=self._f2px(self.vS), bx2=self._f2px(self.vE);
     var ry = e.clientY - ov.getBoundingClientRect().top;
     var nLanesMD=self.channels.length||1;
-    var slotHMD=(75-5)/nLanesMD;
-    var focLaneMD=Math.floor(self.focusY*nLanesMD);
-    focLaneMD=Math.max(0,Math.min(nLanesMD-1,focLaneMD));
-    var mfy1=5+focLaneMD*slotHMD, mfy2=mfy1+slotHMD;
+    var inVBand=false;
+    if(self.showLaneVbrush && nLanesMD>1){
+      var slotHMD=(75-5)/nLanesMD;
+      var focLaneMD=Math.floor(self.focusY*nLanesMD);
+      focLaneMD=Math.max(0,Math.min(nLanesMD-1,focLaneMD));
+      var mfy1=5+focLaneMD*slotHMD, mfy2=mfy1+slotHMD;
+      inVBand=(ry>=mfy1-4&&ry<=mfy2+4);
+    }
 
     var mode;
     if(Math.abs(px-bx1)<self.HPIX)           mode='L';
     else if(Math.abs(px-bx2)<self.HPIX)      mode='R';
     else if(gf>self.vS&&gf<self.vE)          mode='M';
-    else if(ry>=mfy1-4&&ry<=mfy2+4)          mode='V';
+    else if(inVBand)                          mode='V';
     else                                      mode='N';
 
-    self.drag={mode:mode,anchor:gf,snapS:self.vS,snapE:self.vE};
+    self.drag={mode:mode,anchor:gf,anchorPx:px,snapS:self.vS,snapE:self.vE};
     ov.className='tlw-ov-wrap '+((mode==='L'||mode==='R')?'tlw-cur-ew':(mode==='V'?'tlw-cur-ns':'tlw-cur-grabbing'));
     e.preventDefault();
   });
@@ -799,13 +837,52 @@ TimelineWidget.prototype._bindDOM=function(){
     self._drawOv(); self._drawLabels();
     if(!self.lazyWave) self._drawDet();
   };
-  var onUp=function(){
+  var onUp=function(e){
     if(!self.drag) return;
+    var wasMode=self.drag.mode, wasPx=self.drag.anchorPx;
     self.drag=null;
     self._stopEdge();
     ov.className='tlw-ov-wrap tlw-cur-default';
     self._draw();
     self._syncTableToView();
+
+    // Overview click-to-navigate: N mode + cursor barely moved = treat as click
+    if(wasMode==='N' && self.rows.length){
+      var curPx=self._mPx(e);
+      if(Math.abs(curPx-wasPx)<6){
+        var gf2=self._px2f(curPx);
+        var ts2=self.gMin+gf2*self.gSpan;
+        var ry3=e.clientY - ov.getBoundingClientRect().top;
+        var nL=self.channels.length||1;
+        var sH=(75-5)/nL;
+        var laneClicked=Math.max(0,Math.min(nL-1,Math.floor((ry3-5)/sH)));
+        var chanClicked=self.channels[laneClicked];
+        // Find closest segment in that lane around the click time
+        var hits=self.rows.filter(function(r){
+          return r.raw.channel===chanClicked && r.ts<=ts2 && r.te>=ts2;
+        });
+        if(!hits.length){
+          // Widen search to nearest segment within 5% of global span
+          var margin=self.gSpan*0.05;
+          hits=self.rows.filter(function(r){
+            return r.raw.channel===chanClicked && r.te>=ts2-margin && r.ts<=ts2+margin;
+          });
+          hits.sort(function(a,b){ return Math.abs((a.ts+a.te)/2-ts2)-Math.abs((b.ts+b.te)/2-ts2); });
+        }
+        if(hits.length){
+          var r=hits[0], pad2=(r.te-r.ts)*0.4;
+          self.focusId=r.id;
+          self.focusY=(self.channels.indexOf(r.raw.channel)+0.5)/Math.max(1,self.channels.length);
+          self.vS=Math.max(0,(r.ts-pad2-self.gMin)/self.gSpan);
+          self.vE=Math.min(1,(r.te+pad2-self.gMin)/self.gSpan);
+          self._scrollOvToBrush();
+          if(!self.detOpen) self._toggleDet();
+          self._draw();
+          self._highlightRow(r.id);
+          self._syncTableToView();
+        }
+      }
+    }
   };
   document.addEventListener('mousemove',onMove);
   document.addEventListener('mouseup',  onUp);
