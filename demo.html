@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Timeline Widget - Single Lane Focus Demo</title>
+<title>Timeline Widget Demo</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_bootstrap3.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/jquery@1.12.4/dist/jquery.min.js"></script>
@@ -19,87 +19,98 @@
 <div id="my-table" style="margin-top:16px"></div>
 
 <script>
+/* ── Seeded RNG ── */
 function mkRng(s){ return function(){ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
-var PAL=['#337ab7','#f0ad4e','#d9534f','#5cb85c','#9b59b6','#e67e22','#1abc9c','#e91e63'];
-var LEVELS=['INFO','INFO','WARN','ERROR','INFO','WARN'];
-var CHANS=['ch-1','ch-2','ch-3','ch-4'];
-var TYPES=['sine','square','sawtooth','noise','ecg','stepped'];
 
-function makeSVG(seed,baseColor){
+/* ── SVG waveform generator (no channel dependency) ── */
+var TYPES=['sine','square','sawtooth','noise','ecg','stepped'];
+function makeSVG(seed){
   var rng=mkRng(seed+1);
   var type=TYPES[seed%TYPES.length];
   var W=400, H=80, mid=H/2;
-  var pts=[], i, x, y;
+  var pts=[], x, y;
   if(type==='sine'){
     var f=1+(seed%4), amp=18+rng()*10, ph=rng()*Math.PI*2;
     for(x=0;x<=W;x+=3){ y=mid-Math.sin(f*2*Math.PI*x/W+ph)*amp+(rng()-0.5)*2; pts.push(x+','+y.toFixed(1)); }
-  }else if(type==='square'){
+  } else if(type==='square'){
     var f=2+(seed%3), amp=16+rng()*8;
     for(x=0;x<=W;x+=2){ var v=Math.sin(f*2*Math.PI*x/W)>0?1:-1; y=mid-v*amp+(rng()-0.5)*2; pts.push(x+','+y.toFixed(1)); }
-  }else if(type==='sawtooth'){
+  } else if(type==='sawtooth'){
     var f=2+(seed%4), amp=16+rng()*8;
     for(x=0;x<=W;x+=2){ var p=(x/W*f)%1; y=mid-(p*2-1)*amp+(rng()-0.5)*2; pts.push(x+','+y.toFixed(1)); }
-  }else if(type==='noise'){
+  } else if(type==='noise'){
     var prev=mid;
-    for(x=0;x<=W;x+=3){ prev=prev*0.6+(mid+(rng()-0.5)*40)*0.4; y=prev; pts.push(x+','+y.toFixed(1)); }
-  }else if(type==='ecg'){
+    for(x=0;x<=W;x+=3){ prev=prev*0.6+(mid+(rng()-0.5)*40)*0.4; pts.push(x+','+prev.toFixed(1)); }
+  } else if(type==='ecg'){
     for(x=0;x<=W;x+=2){
-      var p=(x%90)/90, y=mid+(rng()-0.5)*2;
-      if(p>.25&&p<.3) y=mid-28; else if(p>.3&&p<.35) y=mid+10; else if(p>.35&&p<.4) y=mid-5;
+      var pp=(x%90)/90; y=mid+(rng()-0.5)*2;
+      if(pp>.25&&pp<.3) y=mid-28; else if(pp>.3&&pp<.35) y=mid+10; else if(pp>.35&&pp<.4) y=mid-5;
       pts.push(x+','+y.toFixed(1));
     }
-  }else{
+  } else {
     var steps=5+(seed%4), amp=14+rng()*8;
     for(x=0;x<=W;x+=2){ var st=Math.floor(x/W*steps); y=mid-(st%2===0?1:-1)*amp+(rng()-0.5)*2; pts.push(x+','+y.toFixed(1)); }
   }
-  var gradId='grad'+seed;
-  return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">'+
-    '  <defs><linearGradient id="'+gradId+'" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:'+baseColor+';stop-opacity:1"/><stop offset="100%" style="stop-color:#ffffff;stop-opacity:0"/></linearGradient></defs>'+
-    '  <path d="M'+pts.shift()+pts.map(function(p){ return ' L'+p; }).join('')+'" fill="none" stroke="url(#'+gradId+')" stroke-width="1.8" stroke-linecap="round"/>'+
-    '  <rect x="'+Math.floor(W*0.1)+'" y="'+Math.floor(H*0.2)+'" width="'+Math.floor(W*0.3)+'" height="'+Math.floor(H*0.2)+'" fill="rgba(255,0,0,0.15)" stroke="rgba(255,0,0,0.5)" stroke-width="1"/>'+
-    '  <circle cx="'+Math.floor(W*0.75)+'" cy="'+Math.floor(H*0.25)+'" r="'+Math.floor(Math.min(W,H)*0.08)+'" fill="none" stroke="rgba(0,150,0,0.6)" stroke-width="1.5"/>'+
-    '</svg>';
+  return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">'
+       + '<path d="M'+pts.join(' L')+'" fill="none" stroke="#6baed6" stroke-width="1.6" stroke-linecap="round"/>'
+       + '</svg>';
 }
 
+/* ── Data builder (no channel) ── */
 function buildRows(count){
-  var rows=[];
-  var rng=mkRng(12345);
-  var baseTime = Date.parse('2024-03-01T08:00:00Z');
-  var avgGap   = 90*1000, jitter = 60*1000;
-  var t = baseTime;
+  var rows=[], rng=mkRng(12345);
+  var baseTime=Date.parse('2024-03-01T08:00:00Z');
+  var avgGap=90*1000, jitter=60*1000;
+  var t=baseTime;
   for(var i=0;i<count;i++){
-    var delta = (rng()*2-1)*jitter;
-    t = Math.max(baseTime, t + delta);
-    var start = new Date(t).toISOString();
-    var durSec = 10 + rng()*290;
-    var endMs  = t + durSec*1000;
-    var end    = new Date(endMs).toISOString();
-    rows.push({ id:i+1, timestamp:start, end_time:end, channel:CHANS[i%4], level:LEVELS[i%6], label:'seg-'+('00'+(i+1)).slice(-3), wave_svg: makeSVG(i, PAL[i%PAL.length]) });
-    t += avgGap + (rng()*2-1)*30*1000;
+    t=Math.max(baseTime, t+(rng()*2-1)*jitter);
+    var start=new Date(t).toISOString();
+    var durMs=(10+rng()*290)*1000;
+    var end=new Date(t+durMs).toISOString();
+    rows.push({
+      id      : i+1,
+      timestamp: start,
+      end_time : end,
+      label   : 'seg-'+('00'+(i+1)).slice(-3),
+      wave_svg: makeSVG(i)
+    });
+    t+=avgGap+(rng()*2-1)*30*1000;
   }
   return rows;
 }
 
+/* ── Tabulator ── */
 var table=new Tabulator('#my-table',{
-  data:buildRows(200), height:'400px', layout:'fitColumns',
-  pagination:'local', paginationSize:25, paginationSizeSelector:[10,25,50,100],
+  data        : buildRows(200),
+  height      : '400px',
+  layout      : 'fitColumns',
+  pagination  : 'local',
+  paginationSize: 25,
+  paginationSizeSelector:[10,25,50,100],
   columns:[
-    {title:'#', field:'id', width:50, hozAlign:'right'},
-    {title:'Signal', field:'wave_svg', width:120, formatter:function(cell){ return '<div style="height:30px;overflow:hidden">'+cell.getValue()+'</div>'; }},
-    {title:'Level', field:'level', width:78, formatter:function(cell){ var m={'ERROR':'danger','WARN':'warning','INFO':'default'}; return '<span class="label label-'+(m[cell.getValue()]||'default')+'">'+cell.getValue()+'</span>'; }},
-    {title:'Channel',field:'channel', width:90},
-    {title:'Label', field:'label', width:90},
-    {title:'Start', field:'timestamp', width:140, formatter:function(cell){ return new Date(cell.getValue()).toLocaleString('en-GB',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }},
-    {title:'Dur', width:64, formatter:function(cell){
-      var r=cell.getRow().getData();
-      var ms=new Date(r.end_time).getTime()-new Date(r.timestamp).getTime();
-      if(ms<60000) return Math.round(ms)+'ms';
-      if(ms<3600000) return Math.round(ms/60000)+'m';
-      return (ms/3600000).toFixed(1)+'h';
-    }}
+    {title:'#',      field:'id',        width:50,  hozAlign:'right'},
+    {title:'Label',  field:'label',     width:90},
+    {title:'Start',  field:'timestamp', width:150,
+      formatter:function(cell){
+        return new Date(cell.getValue()).toLocaleString('en-GB',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      }
+    },
+    {title:'Dur', width:70,
+      formatter:function(cell){
+        var r=cell.getRow().getData();
+        var ms=new Date(r.end_time).getTime()-new Date(r.timestamp).getTime();
+        if(ms<60000) return (ms/1000).toFixed(1)+'s';
+        if(ms<3600000) return Math.round(ms/60000)+'m';
+        return (ms/3600000).toFixed(1)+'h';
+      }
+    },
+    {title:'Signal', field:'wave_svg', width:140,
+      formatter:function(cell){ return '<div style="height:28px;overflow:hidden">'+cell.getValue()+'</div>'; }
+    }
   ]
 });
 
+/* ── Timeline widget ── */
 new TimelineWidget({
   tableId    : '#my-table',
   containerId: '#tl-mount',
