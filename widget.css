@@ -1,0 +1,170 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Timeline Widget  —  Default (light) skin
+   Override any rule here, or load a dark-skin file after this one.
+   All colours are CSS custom properties so a dark theme only needs to
+   redefine the variables inside a [data-tlw-theme="dark"] selector.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Variables ─────────────────────────────────────────────────────────── */
+:root {
+  --tlw-bg          : #fafafa;
+  --tlw-bg-det      : #ffffff;
+  --tlw-bg-toolbar  : #f8f9fa;
+  --tlw-border      : #e0e0e0;
+  --tlw-border-light: #dddddd;
+  --tlw-text        : #222222;
+  --tlw-text-mid    : #444444;
+  --tlw-text-muted  : #777777;
+  --tlw-text-hint   : #999999;
+  --tlw-accent      : #337ab7;
+  --tlw-accent-dark : #2e6da4;
+  --tlw-accent-light: rgba(51,122,183,0.10);
+  --tlw-bar         : #6baed6;
+  --tlw-bar-focus   : #2171b5;
+  --tlw-focus-bg    : #fffbe6;
+  --tlw-grid        : #ececec;
+  --tlw-tip-bg      : rgba(0,0,0,0.85);
+}
+
+/* ── Dark theme overrides (add data-tlw-theme="dark" to the root div) ── */
+[data-tlw-theme="dark"] {
+  --tlw-bg          : #1e1e2e;
+  --tlw-bg-det      : #16161e;
+  --tlw-bg-toolbar  : #252535;
+  --tlw-border      : #3a3a5c;
+  --tlw-border-light: #3a3a5c;
+  --tlw-text        : #cdd6f4;
+  --tlw-text-mid    : #a6adc8;
+  --tlw-text-muted  : #7f849c;
+  --tlw-text-hint   : #585b70;
+  --tlw-accent      : #89b4fa;
+  --tlw-accent-dark : #74c7ec;
+  --tlw-accent-light: rgba(137,180,250,0.10);
+  --tlw-bar         : #89b4fa;
+  --tlw-bar-focus   : #cba6f7;
+  --tlw-focus-bg    : #313244;
+  --tlw-grid        : #313244;
+  --tlw-tip-bg      : rgba(17,17,27,0.92);
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+.tlw { font-family: inherit; font-size: 13px; }
+
+.tlw-sec {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em;
+  color: var(--tlw-text-mid);
+}
+.tlw-hint {
+  font-size: 10px; color: var(--tlw-text-muted); margin-left: 6px;
+}
+
+/* ── Overview canvas wrapper ─────────────────────────────────────────────── */
+.tlw-ov-wrap {
+  position: relative;
+  border: 1px solid var(--tlw-border-light);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--tlw-bg);
+  -webkit-user-select: none; -ms-user-select: none; user-select: none;
+}
+.tlw-ov-wrap canvas { width: 100%; display: block; }
+
+/* ── Detail canvas wrapper ───────────────────────────────────────────────── */
+.tlw-det-wrap {
+  position: relative;
+  border: 1px solid var(--tlw-border-light);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--tlw-bg-det);
+  -webkit-user-select: none; -ms-user-select: none; user-select: none;
+}
+.tlw-det-wrap canvas { width: 100%; display: block; }
+
+/* ── Cursors ─────────────────────────────────────────────────────────────── */
+.tlw-cur-default   { cursor: default;     }
+.tlw-cur-ew        { cursor: ew-resize;   }
+.tlw-cur-grab      { cursor: grab;        }
+.tlw-cur-grabbing  { cursor: grabbing;    }
+.tlw-cur-pointer   { cursor: pointer;     }
+
+/* ── Brush overlay (DOM div, used only for cursor hit area) ──────────────── */
+.tlw-brush {
+  position: absolute; top: 0; height: 100%;
+  pointer-events: none;
+  background: var(--tlw-accent-light);
+  box-sizing: border-box;
+}
+
+/* ── Brush tooltip ───────────────────────────────────────────────────────── */
+.tlw-tip {
+  position: absolute; bottom: 4px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--tlw-tip-bg); color: #fff;
+  font-size: 11px; padding: 3px 8px;
+  border-radius: 3px; white-space: nowrap;
+  pointer-events: none; z-index: 2;
+}
+
+/* ── Detail axis labels ──────────────────────────────────────────────────── */
+.tlw-det-axis {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--tlw-text-mid);
+  margin-top: 2px; padding: 0 4px; margin-bottom: 4px; font-weight: 500;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+.tlw-toolbar {
+  display: flex; align-items: center; flex-wrap: nowrap; gap: 6px;
+  padding: 5px 8px;
+  background: var(--tlw-bg-toolbar);
+  border: 1px solid var(--tlw-border);
+  border-radius: 4px; margin: 5px 0;
+}
+.tlw-toolbar .tlw-sep { color: #ccc; margin: 0 2px; }
+.tlw-toolbar label    { font-size: 11px; color: var(--tlw-text-mid); margin: 0; cursor: pointer; white-space: nowrap; }
+
+/* ── Stats strip (right side of toolbar) ────────────────────────────────── */
+.tlw-stats {
+  margin-left: auto; font-size: 11px; color: var(--tlw-text-mid);
+  white-space: nowrap; display: flex; gap: 14px; align-items: center;
+}
+.tlw-stats strong { color: var(--tlw-text); }
+
+/* ── Overview nav header ─────────────────────────────────────────────────── */
+.tlw-ov-header {
+  display: flex; align-items: center; margin-bottom: 2px;
+}
+.tlw-ov-header .tlw-toggle-btn {
+  background: none; border: none; padding: 0;
+  cursor: pointer; display: flex; align-items: center;
+}
+.tlw-caret { font-size: 11px; color: var(--tlw-text-hint); margin-left: 4px; }
+
+/* ── Detail section header ───────────────────────────────────────────────── */
+.tlw-det-header {
+  display: flex; align-items: center; margin-bottom: 3px;
+}
+.tlw-det-header .tlw-toggle-btn {
+  background: none; border: none; padding: 0;
+  cursor: pointer; display: flex; align-items: center;
+}
+
+/* ── Collapsible body ────────────────────────────────────────────────────── */
+.tlw-collapsible {
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+
+/* ── Scope / active button state ─────────────────────────────────────────── */
+.tlw-scope-on {
+  background-color: var(--tlw-accent)  !important;
+  color:            #fff                !important;
+  border-color:     var(--tlw-accent-dark) !important;
+}
+
+/* ── Table row highlight ─────────────────────────────────────────────────── */
+.tlw-row-hi {
+  background: var(--tlw-focus-bg) !important;
+  outline: 2px solid var(--tlw-bar); outline-offset: -2px;
+}
