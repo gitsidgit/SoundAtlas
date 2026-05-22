@@ -6,29 +6,45 @@
 <title>Timeline Widget Demo</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_bootstrap3.min.css" rel="stylesheet">
+<!-- Timeline widget skin — swap for widget-dark.css or your own skin -->
+<link id="tlw-skin" href="widget.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/jquery@1.12.4/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/js/bootstrap.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
 <script src="widget.js"></script>
 <style>
   body { background:#f5f5f5; font-size:13px; padding:16px; }
+  #dark-toggle { position:fixed; top:10px; right:10px; z-index:999; }
 </style>
 </head>
 <body>
+
+<button id="dark-toggle" class="btn btn-xs btn-default">&#9790; Dark</button>
+
 <div id="tl-mount"></div>
 <div id="my-table" style="margin-top:16px"></div>
 
 <script>
+/* ── Dark mode toggle (demo only) ── */
+document.getElementById('dark-toggle').addEventListener('click',function(){
+  var root=document.getElementById('tlw-root');
+  if(root.getAttribute('data-tlw-theme')==='dark'){
+    root.removeAttribute('data-tlw-theme');
+    this.textContent='\u263E Dark';
+  } else {
+    root.setAttribute('data-tlw-theme','dark');
+    this.textContent='\u2600 Light';
+  }
+});
+
 /* ── Seeded RNG ── */
 function mkRng(s){ return function(){ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
 
-/* ── SVG waveform generator (no channel dependency) ── */
+/* ── SVG waveform generator ── */
 var TYPES=['sine','square','sawtooth','noise','ecg','stepped'];
 function makeSVG(seed){
-  var rng=mkRng(seed+1);
-  var type=TYPES[seed%TYPES.length];
-  var W=400, H=80, mid=H/2;
-  var pts=[], x, y;
+  var rng=mkRng(seed+1), type=TYPES[seed%TYPES.length];
+  var W=400, H=80, mid=H/2, pts=[], x, y;
   if(type==='sine'){
     var f=1+(seed%4), amp=18+rng()*10, ph=rng()*Math.PI*2;
     for(x=0;x<=W;x+=3){ y=mid-Math.sin(f*2*Math.PI*x/W+ph)*amp+(rng()-0.5)*2; pts.push(x+','+y.toFixed(1)); }
@@ -52,72 +68,59 @@ function makeSVG(seed){
     for(x=0;x<=W;x+=2){ var st=Math.floor(x/W*steps); y=mid-(st%2===0?1:-1)*amp+(rng()-0.5)*2; pts.push(x+','+y.toFixed(1)); }
   }
   return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">'
-       + '<path d="M'+pts.join(' L')+'" fill="none" stroke="#6baed6" stroke-width="1.6" stroke-linecap="round"/>'
+       + '<path d="M'+pts.join(' L')+'" fill="none" stroke="#6baed6" stroke-width="1.6"/>'
        + '</svg>';
 }
 
-/* ── Data builder (no channel) ── */
+/* ── Data builder ── */
 function buildRows(count){
   var rows=[], rng=mkRng(12345);
-  var baseTime=Date.parse('2024-03-01T08:00:00Z');
-  var avgGap=90*1000, jitter=60*1000;
-  var t=baseTime;
+  var base=Date.parse('2024-03-01T08:00:00Z'), t=base;
   for(var i=0;i<count;i++){
-    t=Math.max(baseTime, t+(rng()*2-1)*jitter);
+    t=Math.max(base, t+(rng()*2-1)*60000);
     var start=new Date(t).toISOString();
     var durMs=(10+rng()*290)*1000;
-    var end=new Date(t+durMs).toISOString();
-    rows.push({
-      id      : i+1,
-      timestamp: start,
-      end_time : end,
-      label   : 'seg-'+('00'+(i+1)).slice(-3),
-      wave_svg: makeSVG(i)
-    });
-    t+=avgGap+(rng()*2-1)*30*1000;
+    rows.push({ id:i+1, timestamp:start, end_time:new Date(t+durMs).toISOString(),
+                label:'seg-'+('00'+(i+1)).slice(-3), wave_svg:makeSVG(i) });
+    t+=90000+(rng()*2-1)*30000;
   }
   return rows;
 }
 
 /* ── Tabulator ── */
 var table=new Tabulator('#my-table',{
-  data        : buildRows(200),
-  height      : '400px',
-  layout      : 'fitColumns',
-  pagination  : 'local',
-  paginationSize: 25,
-  paginationSizeSelector:[10,25,50,100],
+  data:buildRows(200), height:'400px', layout:'fitColumns',
+  pagination:'local', paginationSize:25, paginationSizeSelector:[10,25,50,100],
   columns:[
     {title:'#',      field:'id',        width:50,  hozAlign:'right'},
     {title:'Label',  field:'label',     width:90},
     {title:'Start',  field:'timestamp', width:150,
       formatter:function(cell){
-        return new Date(cell.getValue()).toLocaleString('en-GB',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
-      }
-    },
-    {title:'Dur', width:70,
-      formatter:function(cell){
-        var r=cell.getRow().getData();
-        var ms=new Date(r.end_time).getTime()-new Date(r.timestamp).getTime();
-        if(ms<60000) return (ms/1000).toFixed(1)+'s';
-        if(ms<3600000) return Math.round(ms/60000)+'m';
-        return (ms/3600000).toFixed(1)+'h';
-      }
-    },
+        return new Date(cell.getValue()).toLocaleString('en-GB',
+          {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      }},
+    {title:'Dur', width:70, formatter:function(cell){
+      var r=cell.getRow().getData();
+      var ms=new Date(r.end_time)-new Date(r.timestamp);
+      return ms<60000?(ms/1000).toFixed(1)+'s':Math.round(ms/60000)+'m';
+    }},
     {title:'Signal', field:'wave_svg', width:140,
-      formatter:function(cell){ return '<div style="height:28px;overflow:hidden">'+cell.getValue()+'</div>'; }
-    }
+      formatter:function(cell){ return '<div style="height:28px;overflow:hidden">'+cell.getValue()+'</div>'; }}
   ]
 });
 
-/* ── Timeline widget ── */
-new TimelineWidget({
+/* ── Timeline widget ──
+   keepFields trims the raw row copy to only what's needed.
+   The widget always also keeps id/timestamp/end_time/wave_svg automatically.
+── */
+var tlw=new TimelineWidget({
   tableId    : '#my-table',
   containerId: '#tl-mount',
   timeStart  : 'timestamp',
   timeEnd    : 'end_time',
   waveform   : 'wave_svg',
-  idField    : 'id'
+  idField    : 'id',
+  keepFields : ['label']   // any extra fields you want accessible later
 });
 </script>
 </body>
