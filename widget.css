@@ -26,7 +26,8 @@
   --tlw-tip-bg      : rgba(0,0,0,0.85);
 }
 
-/* ── Dark theme overrides (add data-tlw-theme="dark" to the root div) ── */
+/* ── Dark theme overrides — add data-tlw-theme="dark" to <body> or any ancestor ── */
+body[data-tlw-theme="dark"],
 [data-tlw-theme="dark"] {
   --tlw-bg          : #1e1e2e;
   --tlw-bg-det      : #16161e;
