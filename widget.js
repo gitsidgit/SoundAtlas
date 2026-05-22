@@ -620,13 +620,15 @@ TimelineWidget.prototype._drawOv=function(){
   this._drawTicks(ctx,W,pad,RULER_Y,os,oe);
 
   // ── Time brush overlay ──
-  var bx1=clamp(Math.round(this._f2px(this.vS)),0,W);
-  var bx2=clamp(Math.round(this._f2px(this.vE)),0,W);
+  // bx1/bx2 unclamped for hit-test consistency; clamped for drawing
+  var bx1raw=this._f2px(this.vS), bx2raw=this._f2px(this.vE);
+  var bx1=clamp(Math.round(bx1raw),0,W), bx2=clamp(Math.round(bx2raw),0,W);
   ctx.fillStyle='rgba(51,122,183,0.10)';
   ctx.fillRect(bx1,BAR_TOP-1,bx2-bx1,OVH-BAR_TOP+1);
   ctx.strokeStyle='#337ab7'; ctx.lineWidth=2;
   ctx.beginPath(); ctx.moveTo(bx1,BAR_TOP-1); ctx.lineTo(bx1,OVH); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(bx2,BAR_TOP-1); ctx.lineTo(bx2,OVH); ctx.stroke();
+  // Draw handles at clamped position so pill is always fully visible at edges
   this._drawHandle(ctx,bx1,BAR_TOP+BAR_H/2);
   this._drawHandle(ctx,bx2,BAR_TOP+BAR_H/2);
 
@@ -976,20 +978,30 @@ TimelineWidget.prototype._bindDOM=function(){
   ov.addEventListener('mousemove',function(e){
     if(self.drag) return;
     var px=self._mPx(e), gf=self._px2f(px);
+    // Use unclamped handle positions for hit-test so edge handles are reachable
     var bx1=self._f2px(self.vS), bx2=self._f2px(self.vE);
-    if(Math.abs(px-bx1)<self.HPIX||Math.abs(px-bx2)<self.HPIX) ov.className='tlw-ov-wrap tlw-cur-ew';
-    else if(gf>self.vS&&gf<self.vE)                            ov.className='tlw-ov-wrap tlw-cur-grab';
-    else                                                        ov.className='tlw-ov-wrap tlw-cur-pointer';
+    var W=self._ovW();
+    // When a handle is off-screen it's clamped to 0 or W by the canvas — use
+    // a wider hit zone at the edges so the visible pill half still responds
+    var hit1=Math.abs(px-clamp(bx1,0,W))<self.HPIX+6;
+    var hit2=Math.abs(px-clamp(bx2,0,W))<self.HPIX+6;
+    if(hit1||hit2) ov.className='tlw-ov-wrap tlw-cur-ew';
+    else if(gf>self.vS&&gf<self.vE) ov.className='tlw-ov-wrap tlw-cur-grab';
+    else ov.className='tlw-ov-wrap tlw-cur-pointer';
   });
   ov.addEventListener('mouseleave',function(){ if(!self.drag) ov.className='tlw-ov-wrap tlw-cur-default'; });
 
   ov.addEventListener('mousedown',function(e){
     var px=self._mPx(e), gf=self._px2f(px);
-    var bx1=self._f2px(self.vS), bx2=self._f2px(self.vE), mode;
-    if(Math.abs(px-bx1)<self.HPIX)      mode='L';
-    else if(Math.abs(px-bx2)<self.HPIX) mode='R';
-    else if(gf>self.vS&&gf<self.vE)     mode='M';
-    else                                 mode='N';
+    var bx1=self._f2px(self.vS), bx2=self._f2px(self.vE);
+    var W=self._ovW();
+    var hit1=Math.abs(px-clamp(bx1,0,W))<self.HPIX+6;
+    var hit2=Math.abs(px-clamp(bx2,0,W))<self.HPIX+6;
+    var mode;
+    if(hit1)                         mode='L';
+    else if(hit2)                    mode='R';
+    else if(gf>self.vS&&gf<self.vE) mode='M';
+    else                             mode='N';
     self.drag={mode:mode,anchor:gf,anchorPx:px,snapS:self.vS,snapE:self.vE};
     ov.className='tlw-ov-wrap '+((mode==='L'||mode==='R')?'tlw-cur-ew':mode==='M'?'tlw-cur-grabbing':'tlw-cur-crosshair');
     e.preventDefault();
@@ -997,17 +1009,23 @@ TimelineWidget.prototype._bindDOM=function(){
 
   this._onDocMove=function(e){
     if(!self.drag) return;
-    var px=self._mPx(e), gf=self._px2f(px);
+    // Use raw client position for fraction conversion — do NOT clamp to canvas
+    // width before converting, or handles get pinned at the viewport edge.
+    var rc=self._el('ov').getBoundingClientRect();
+    var rawPx=e.clientX-rc.left;          // may be negative or > W — intentional
+    var pad=self.OV_PAD, W=self._ovW();
+    var gf=self.oS+((rawPx-pad)/(W-pad*2))*(self.oE-self.oS);
+    // px used only for edge-pan detection — clamp that separately
+    var px=clamp(rawPx,0,W);
     var d=self.drag, w=d.snapE-d.snapS, MIN=self.MIN_BRUSH;
     if(d.mode==='L')       self.vS=clamp(gf,0,self.vE-MIN);
     else if(d.mode==='R')  self.vE=clamp(gf,self.vS+MIN,1);
     else if(d.mode==='M'){ var delta=gf-d.anchor; self.vS=clamp(d.snapS+delta,0,1-w); self.vE=self.vS+w; }
     else if(d.mode==='N'){ var lo=clamp(Math.min(d.anchor,gf),0,1),hi=clamp(Math.max(d.anchor,gf),0,1); if(hi-lo<MIN)hi=lo+MIN; self.vS=lo;self.vE=hi; }
-    var raw=px/self._ovW();
+    var raw=px/W;
     if(raw<self.EDGE&&self.oS>0) self._startEdge(-1);
     else if(raw>(1-self.EDGE)&&self.oE<1) self._startEdge(1);
     else self._stopEdge();
-    // During drag: draw overview + labels synchronously (low cost), defer detail
     self._drawOv(); self._drawLabels();
     if(!self.lazyWave) self._drawDet();
   };
