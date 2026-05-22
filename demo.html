@@ -13,7 +13,8 @@
 <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
 <script src="widget.js"></script>
 <style>
-  body { background:#f5f5f5; font-size:13px; padding:16px; }
+  body { background:#f5f5f5; font-size:13px; padding:16px; transition:background .2s; }
+  body[data-tlw-theme="dark"] { background:#1a1a2e; color:#cdd6f4; }
   #dark-toggle { position:fixed; top:10px; right:10px; z-index:999; }
 </style>
 </head>
@@ -27,7 +28,7 @@
 <script>
 /* ── Dark mode toggle (demo only) ── */
 document.getElementById('dark-toggle').addEventListener('click',function(){
-  var root=document.getElementById('tlw-root');
+  var root=document.body;
   if(root.getAttribute('data-tlw-theme')==='dark'){
     root.removeAttribute('data-tlw-theme');
     this.textContent='\u263E Dark';
