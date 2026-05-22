@@ -1,51 +1,9 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   TimelineWidget  v3.0
+   Depends on: widget.css (loaded separately), Tabulator ≥ 6
+   ═══════════════════════════════════════════════════════════════════════════ */
 (function(g){
 'use strict';
-
-/* ─── CSS ─────────────────────────────────────────────────────────────────── */
-var CSS='\
-.tlw{font-family:inherit;font-size:13px}\
-.tlw-sec{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555}\
-.tlw-hint{font-size:10px;color:#777;margin-left:6px}\
-.tlw-ov-wrap{position:relative;border:1px solid #ddd;border-radius:4px;\
-  overflow:hidden;background:#fafafa;\
-  -webkit-user-select:none;-ms-user-select:none;user-select:none}\
-.tlw-ov-wrap canvas{width:100%;display:block}\
-.tlw-det-wrap{position:relative;border:1px solid #ddd;border-radius:4px;\
-  overflow:hidden;background:#fff;\
-  -webkit-user-select:none;-ms-user-select:none;user-select:none}\
-.tlw-det-wrap canvas{width:100%;display:block}\
-.tlw-cur-default{cursor:default}\
-.tlw-cur-ew{cursor:ew-resize}\
-.tlw-cur-grab{cursor:grab}\
-.tlw-cur-grabbing{cursor:grabbing}\
-.tlw-cur-pointer{cursor:pointer}\
-.tlw-brush{position:absolute;top:0;height:100%;pointer-events:none;\
-  background:rgba(51,122,183,0.07);box-sizing:border-box}\
-.tlw-tip{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);\
-  background:rgba(0,0,0,.85);color:#fff;font-size:11px;padding:3px 8px;\
-  border-radius:3px;white-space:nowrap;pointer-events:none;z-index:2}\
-.tlw-anchors{display:flex;justify-content:space-between;font-size:11px;\
-  color:#333;padding:2px 4px 0;font-weight:600;letter-spacing:0}\
-.tlw-det-axis{display:flex;justify-content:space-between;font-size:11px;\
-  color:#333;margin-top:2px;padding:0 4px;margin-bottom:4px;font-weight:500}\
-.tlw-toolbar{display:flex;align-items:center;flex-wrap:nowrap;gap:6px;\
-  padding:5px 8px;background:#f8f9fa;border:1px solid #e0e0e0;\
-  border-radius:4px;margin:5px 0}\
-.tlw-toolbar .tlw-stats{margin-left:auto;font-size:11px;color:#333;\
-  white-space:nowrap;display:flex;gap:14px;align-items:center}\
-.tlw-toolbar .tlw-stats strong{color:#111}\
-.tlw-scope-on{background-color:#337ab7!important;color:#fff!important;\
-  border-color:#2e6da4!important}\
-.tlw-row-hi{background:#fffbe6!important;\
-  outline:2px solid #6baed6;outline-offset:-2px}\
-.tlw-det-header{display:flex;align-items:center;margin-bottom:3px}';
-
-function injectCSS(){
-  if(document.getElementById('tlw-css')) return;
-  var s=document.createElement('style');
-  s.id='tlw-css'; s.textContent=CSS;
-  document.head.appendChild(s);
-}
 
 /* ─── Utilities ───────────────────────────────────────────────────────────── */
 function fmtD(ts){
@@ -61,56 +19,190 @@ function fmtS(ms){
 function toMs(v){ return typeof v==='number'?v:new Date(v).getTime(); }
 function clamp(v,lo,hi){ return v<lo?lo:v>hi?hi:v; }
 
+/* ─── SVG pre-parser ──────────────────────────────────────────────────────
+ * Called once per row during _buildRows.  Returns a compact parsed
+ * representation so the hot draw path never re-parses strings.
+ * Handles: path d= (M L m l C c Q q A a Z z), polyline/polygon points=
+ * and nested <path> / <polyline> elements via simple tag scanning.
+ * ───────────────────────────────────────────────────────────────────────── */
+function parseSVG(svgStr){
+  if(!svgStr) return null;
+  // Extract viewBox dimensions
+  var svgW=400, svgH=80;
+  var vbm=svgStr.match(/viewBox=["']\s*([\d.+-]+)[\s,]+([\d.+-]+)[\s,]+([\d.+-]+)[\s,]+([\d.+-]+)/i);
+  if(vbm){ svgW=parseFloat(vbm[3])||400; svgH=parseFloat(vbm[4])||80; }
+
+  var shapes=[];
+
+  /* ── Extract all <path d="…"> segments ── */
+  var pathRe=/<path[^>]*\bd=["']([^"']+)["'][^>]*\/?>/gi;
+  var pm;
+  while((pm=pathRe.exec(svgStr))!==null){
+    var cmds=parsePathD(pm[1]);
+    if(cmds.length) shapes.push({type:'path',cmds:cmds});
+  }
+
+  /* ── Extract all <polyline/polygon points="…"> ── */
+  var polyRe=/<poly(?:line|gon)[^>]*\bpoints=["']([^"']+)["'][^>]*\/?>/gi;
+  var polym;
+  while((polym=polyRe.exec(svgStr))!==null){
+    var pts=parsePoints(polym[1]);
+    if(pts.length) shapes.push({type:'poly',pts:pts});
+  }
+
+  return {w:svgW, h:svgH, shapes:shapes};
+}
+
+function parsePathD(d){
+  var raw=d.match(/[MmLlCcQqAaZz][^MmLlCcQqAaZz]*/g)||[];
+  var out=[];
+  raw.forEach(function(seg){
+    var t=seg[0];
+    var nums=(seg.slice(1).trim().match(/-?[\d.eE+-]+/g)||[]).map(Number);
+    out.push({t:t,n:nums});
+  });
+  return out;
+}
+
+function parsePoints(str){
+  var raw=(str.trim().match(/-?[\d.eE+-]+/g)||[]).map(Number);
+  var pts=[];
+  for(var i=0;i+1<raw.length;i+=2) pts.push(raw[i],raw[i+1]);
+  return pts;
+}
+
+/* ─── SVG → Canvas renderer ───────────────────────────────────────────────
+ * Uses pre-parsed representation.  Supports full M/L/m/l/C/c/Q/q/Z/z.
+ * A/a arcs are approximated as a straight line to avoid heavy math
+ * (good enough for waveform display at small sizes).
+ * ───────────────────────────────────────────────────────────────────────── */
+function renderSVG(ctx, parsed, x, y, w, h){
+  if(!parsed||!parsed.shapes.length) return;
+  var sx=w/parsed.w, sy=h/parsed.h;
+  var curX=x, curY=y, startX=x, startY=y;
+
+  parsed.shapes.forEach(function(shape){
+    if(shape.type==='poly'){
+      var pts=shape.pts;
+      if(!pts.length) return;
+      ctx.beginPath();
+      ctx.moveTo(x+pts[0]*sx, y+pts[1]*sy);
+      for(var i=2;i+1<pts.length;i+=2) ctx.lineTo(x+pts[i]*sx, y+pts[i+1]*sy);
+      ctx.stroke();
+      return;
+    }
+    // path
+    ctx.beginPath();
+    curX=x; curY=y;
+    shape.cmds.forEach(function(seg){
+      var t=seg.t, n=seg.n, i=0;
+      switch(t){
+        case 'M':
+          while(i+1<n.length){ curX=x+n[i]*sx; curY=y+n[i+1]*sy; ctx.moveTo(curX,curY); startX=curX; startY=curY; i+=2; }
+          break;
+        case 'm':
+          while(i+1<n.length){ curX+=n[i]*sx; curY+=n[i+1]*sy; ctx.moveTo(curX,curY); startX=curX; startY=curY; i+=2; }
+          break;
+        case 'L':
+          while(i+1<n.length){ curX=x+n[i]*sx; curY=y+n[i+1]*sy; ctx.lineTo(curX,curY); i+=2; }
+          break;
+        case 'l':
+          while(i+1<n.length){ curX+=n[i]*sx; curY+=n[i+1]*sy; ctx.lineTo(curX,curY); i+=2; }
+          break;
+        case 'H': while(i<n.length){ curX=x+n[i]*sx; ctx.lineTo(curX,curY); i++; } break;
+        case 'h': while(i<n.length){ curX+=n[i]*sx;  ctx.lineTo(curX,curY); i++; } break;
+        case 'V': while(i<n.length){ curY=y+n[i]*sy; ctx.lineTo(curX,curY); i++; } break;
+        case 'v': while(i<n.length){ curY+=n[i]*sy;  ctx.lineTo(curX,curY); i++; } break;
+        case 'C':
+          while(i+5<n.length){
+            ctx.bezierCurveTo(x+n[i]*sx,y+n[i+1]*sy, x+n[i+2]*sx,y+n[i+3]*sy, x+n[i+4]*sx,y+n[i+5]*sy);
+            curX=x+n[i+4]*sx; curY=y+n[i+5]*sy; i+=6;
+          } break;
+        case 'c':
+          while(i+5<n.length){
+            ctx.bezierCurveTo(curX+n[i]*sx,curY+n[i+1]*sy, curX+n[i+2]*sx,curY+n[i+3]*sy, curX+n[i+4]*sx,curY+n[i+5]*sy);
+            curX+=n[i+4]*sx; curY+=n[i+5]*sy; i+=6;
+          } break;
+        case 'Q':
+          while(i+3<n.length){
+            ctx.quadraticCurveTo(x+n[i]*sx,y+n[i+1]*sy, x+n[i+2]*sx,y+n[i+3]*sy);
+            curX=x+n[i+2]*sx; curY=y+n[i+3]*sy; i+=4;
+          } break;
+        case 'q':
+          while(i+3<n.length){
+            ctx.quadraticCurveTo(curX+n[i]*sx,curY+n[i+1]*sy, curX+n[i+2]*sx,curY+n[i+3]*sy);
+            curX+=n[i+2]*sx; curY+=n[i+3]*sy; i+=4;
+          } break;
+        case 'A': case 'a':
+          // Approximate arc as line to endpoint
+          if(i+6<n.length){
+            if(t==='A'){ curX=x+n[i+5]*sx; curY=y+n[i+6]*sy; }
+            else        { curX+=n[i+5]*sx;  curY+=n[i+6]*sy;  }
+            ctx.lineTo(curX,curY);
+          } break;
+        case 'Z': case 'z':
+          ctx.closePath(); curX=startX; curY=startY; break;
+      }
+    });
+    ctx.stroke();
+  });
+}
+
 /* ─── Constructor ─────────────────────────────────────────────────────────── */
 function TimelineWidget(cfg){
-  injectCSS();
-  this.tableId  = cfg.tableId;
-  this.ctnId    = cfg.containerId;
-  this.f_start  = cfg.timeStart  || 'timestamp';
-  this.f_end    = cfg.timeEnd    || 'end_time';
-  this.f_wave   = cfg.waveform   || null;
-  this.f_id     = cfg.idField    || 'id';
-  this.lazyWave = !!cfg.lazyWave;
+  this.tableId   = cfg.tableId;
+  this.ctnId     = cfg.containerId;
+  this.f_start   = cfg.timeStart  || 'timestamp';
+  this.f_end     = cfg.timeEnd    || 'end_time';
+  this.f_wave    = cfg.waveform   || null;
+  this.f_id      = cfg.idField    || 'id';
+  // Optional whitelist of raw-data fields to keep (saves memory on large datasets).
+  // Always includes f_id, f_start, f_end, f_wave automatically.
+  this.f_keep    = cfg.keepFields || null;
+  this.lazyWave  = !!cfg.lazyWave;
+  this.autoSync  = true;   // sync table page to detail view
 
-  this.rows   = [];
+  this.rows  = [];
   this.gMin=0; this.gMax=1; this.gSpan=1;
-  this.vS=0; this.vE=1;   // detail window, fractions of global span
-  this.oS=0; this.oE=1;   // overview viewport, fractions of global span
+  this.vS=0; this.vE=1;    // detail window, 0-1 fractions of global span
+  this.oS=0; this.oE=1;    // overview viewport, 0-1 fractions
 
   this.focusId  = null;
+  this.ovOpen   = true;
   this.detOpen  = true;
   this.scope    = 'all';
+
   this._suppressPageSync   = false;
-  this._detScrollTimer     = null;
+  this._syncTimer          = null;   // debounce for table sync
+  this._drawRAF            = null;   // rAF handle for throttled draws
   this._lastHighlightedRow = null;
   this._benchSamples       = null;
-  this._lastDrawMs         = 0;
-  this._lastWaveCount      = 0;
 
+  // Pointer interaction
   this.drag    = null;
   this.edgeRAF = null;
-  this.EDGE       = 0.04;
-  this.ESPD       = 0.004;
-  this.HPIX       = 14;
-  this.MIN_BRUSH  = 0.001;
-  this.MIN_EDGE   = 0.0;
-  this.OV_PAD     = 18;    // px each side for brush handles
-  this.DET_H      = 96;    // detail canvas px height
-  // Overview canvas layout — from top:
-  //   ANCHOR_H  = 18px  (top timestamp labels drawn IN canvas)
-  //   BAR_H     = 18px  (coalescing bar strip)
-  //   GAP       =  4px
-  //   RULER_H   = 22px  (tick baseline + ticks + labels)
-  // Total OV_H  = 62px
-  this.OV_H       = 62;
-  this.OV_ANCHOR  = 0;     // y-top of anchor label zone
-  this.OV_BAR_TOP = 18;    // y-top of bar strip
-  this.OV_BAR_H   = 18;    // bar strip height
-  this.OV_RULER   = 42;    // y of ruler baseline
-  this.MERGE_PX   = 4;
-  this.MIN_WAVE_PX= 40;
 
-  this._kbZone='none';
+  // Layout / tuning constants
+  this.HPIX        = 14;      // brush handle hit px radius
+  this.OV_PAD      = 18;      // px each side for brush handles
+  this.DET_H       = 96;      // detail canvas height px
+  this.OV_H        = 62;      // overview canvas height px
+  this.OV_BAR_TOP  = 18;      // y-top of bar strip
+  this.OV_BAR_H    = 18;      // bar strip height
+  this.OV_RULER    = 42;      // y of tick ruler baseline
+  this.MERGE_PX    = 4;       // coalesce threshold px
+  this.MIN_WAVE_PX = 40;      // min px width to render waveform
+  this.MIN_BRUSH   = 0.001;
+  this.EDGE        = 0.04;    // auto-pan activation zone
+  this.ESPD        = 0.004;   // auto-pan speed per frame
+
+  this._kbZone = 'none';
+
+  // Bound listener refs (so we can remove them on destroy)
+  this._onDocMove = null;
+  this._onDocUp   = null;
+  this._onDocKey  = null;
+  this._resizeObs = null;
 
   this._buildDOM();
   this._bindDOM();
@@ -119,142 +211,154 @@ function TimelineWidget(cfg){
 
 /* ─── DOM ─────────────────────────────────────────────────────────────────── */
 TimelineWidget.prototype._buildDOM=function(){
-  var uid='tlw'+Math.random().toString(36).slice(2,6);
+  var uid='tlw'+Math.random().toString(36).slice(2,7);
   this.uid=uid;
   var OVH=this.OV_H, DTH=this.DET_H;
+
   var H=[
-    '<div class="tlw" id="'+uid+'">',
+  '<div class="tlw" id="'+uid+'">',
 
-    /* ── Overview ── */
-    '<div style="margin-bottom:2px">',
-    '  <span class="tlw-sec">Overview</span>',
-    '  <span class="tlw-hint">drag brush · scroll or ↑↓ zoom · click item · ← → pan</span>',
-    '</div>',
-    '<div class="tlw-ov-wrap tlw-cur-default" id="'+uid+'_ov">',
-    '  <canvas id="'+uid+'_ovc" height="'+OVH+'"></canvas>',
-    '  <div class="tlw-brush" id="'+uid+'_br">',
-    '    <div class="tlw-tip" id="'+uid+'_tip"></div>',
-    '  </div>',
-    '</div>',
+  /* ── Overview section header ── */
+  '<div class="tlw-ov-header">',
+  '  <button class="tlw-toggle-btn" id="'+uid+'_ovtog" title="Collapse overview">',
+  '    <span class="tlw-sec">Overview</span>',
+  '    <span class="tlw-caret" id="'+uid+'_ovcaret">&#9660;</span>',
+  '  </button>',
+  '  <span class="tlw-hint">drag brush · ↑↓ zoom · ← → pan · click item</span>',
+  '</div>',
 
-    /* ── Single toolbar between Overview and Detail ── */
-    '<div class="tlw-toolbar">',
-    /* Zoom controls */
-    '  <span class="tlw-sec" style="margin:0;white-space:nowrap">Zoom:</span>',
-    '  <div class="btn-group btn-group-xs">',
-    '    <button class="btn btn-default" id="'+uid+'_zin" title="Zoom in overview">+</button>',
-    '    <button class="btn btn-default" id="'+uid+'_zout" title="Zoom out overview">&minus;</button>',
-    '    <button class="btn btn-default" id="'+uid+'_zfull" title="Full overview">All</button>',
-    '  </div>',
-    '  <span id="'+uid+'_zlbl" style="font-size:11px;color:#444;font-weight:700;min-width:28px">1x</span>',
-    '  <input type="range" id="'+uid+'_zslide" min="1" max="200" value="1" step="1" style="width:80px;vertical-align:middle">',
-    /* Separator */
-    '  <span style="color:#ccc;margin:0 2px">|</span>',
-    /* Detail zoom */
-    '  <div class="btn-group btn-group-xs">',
-    '    <button class="btn btn-default" id="'+uid+'_v2" title="Detail 2x zoom">2x</button>',
-    '    <button class="btn btn-default" id="'+uid+'_v5" title="Detail 5x zoom">5x</button>',
-    '    <button class="btn btn-default" id="'+uid+'_v10" title="Detail 10x zoom">10x</button>',
-    '    <button class="btn btn-default" id="'+uid+'_vr" title="Reset detail">Reset</button>',
-    '  </div>',
-    /* Separator */
-    '  <span style="color:#ccc;margin:0 2px">|</span>',
-    /* Scope */
-    '  <div class="btn-group btn-group-xs">',
-    '    <button class="btn btn-default tlw-scope-on" id="'+uid+'_sAll">All</button>',
-    '    <button class="btn btn-default" id="'+uid+'_sPage">Page</button>',
-    '  </div>',
-    /* Lazy */
-    '  <label style="font-size:11px;color:#555;margin:0 0 0 2px;cursor:pointer;white-space:nowrap">',
-    '    <input type="checkbox" id="'+uid+'_lazy"'+(this.lazyWave?' checked':'')+'>&nbsp;Lazy',
-    '  </label>',
-    /* Separator */
-    '  <span style="color:#ccc;margin:0 2px">|</span>',
-    '  <button class="btn btn-default btn-xs" id="'+uid+'_bench" title="Render benchmark">&#9654;</button>',
-    /* Stats pushed to the right */
-    '  <div class="tlw-stats">',
-    '    <span><strong>From</strong> <span id="'+uid+'_sF">—</span></span>',
-    '    <span><strong>To</strong> <span id="'+uid+'_sT">—</span></span>',
-    '    <span><strong>Span</strong> <span id="'+uid+'_sS">—</span></span>',
-    '    <span><strong>Items</strong> <span id="'+uid+'_sN">—</span></span>',
-    '  </div>',
-    '</div>',
+  /* ── Overview collapsible body ── */
+  '<div class="tlw-collapsible" id="'+uid+'_ovbody" style="max-height:'+OVH+'px">',
+  '  <div class="tlw-ov-wrap tlw-cur-default" id="'+uid+'_ov">',
+  '    <canvas id="'+uid+'_ovc" height="'+OVH+'"></canvas>',
+  '    <div class="tlw-brush" id="'+uid+'_br">',
+  '      <div class="tlw-tip" id="'+uid+'_tip"></div>',
+  '    </div>',
+  '  </div>',
+  '</div>',
 
-    /* Benchmark output */
-    '<div id="'+uid+'_benchout" style="display:none;margin-bottom:6px;font-size:11px;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px"></div>',
+  /* ── Toolbar ── */
+  '<div class="tlw-toolbar" id="'+uid+'_tb">',
+  '  <span class="tlw-sec" style="white-space:nowrap">Zoom:</span>',
+  '  <div class="btn-group btn-group-xs">',
+  '    <button class="btn btn-default" id="'+uid+'_zin"  title="Zoom overview in" >+</button>',
+  '    <button class="btn btn-default" id="'+uid+'_zout" title="Zoom overview out">&minus;</button>',
+  '    <button class="btn btn-default" id="'+uid+'_zall" title="Full overview"    >All</button>',
+  '  </div>',
+  '  <span id="'+uid+'_zlbl" style="font-size:11px;font-weight:700;min-width:28px">1x</span>',
+  '  <input type="range" id="'+uid+'_zslide" min="1" max="200" value="1" style="width:80px">',
+  '  <span class="tlw-sep">|</span>',
+  '  <div class="btn-group btn-group-xs">',
+  '    <button class="btn btn-default" id="'+uid+'_v2"  title="Detail 2x" >2x</button>',
+  '    <button class="btn btn-default" id="'+uid+'_v5"  title="Detail 5x" >5x</button>',
+  '    <button class="btn btn-default" id="'+uid+'_v10" title="Detail 10x">10x</button>',
+  '    <button class="btn btn-default" id="'+uid+'_vr"  title="Reset detail">&#8635;</button>',
+  '  </div>',
+  '  <span class="tlw-sep">|</span>',
+  '  <div class="btn-group btn-group-xs">',
+  '    <button class="btn btn-default tlw-scope-on" id="'+uid+'_sAll" >All</button>',
+  '    <button class="btn btn-default"              id="'+uid+'_sPage">Page</button>',
+  '  </div>',
+  '  <label><input type="checkbox" id="'+uid+'_lazy"  '+(this.lazyWave?'checked':'')+'>&#8201;Lazy</label>',
+  '  <label><input type="checkbox" id="'+uid+'_async" checked>&#8201;Auto&#8209;sync</label>',
+  '  <span class="tlw-sep">|</span>',
+  '  <button class="btn btn-default btn-xs" id="'+uid+'_bench" title="Render benchmark">&#9654;</button>',
+  '  <div class="tlw-stats">',
+  '    <span><strong>From</strong> <span id="'+uid+'_sF">—</span></span>',
+  '    <span><strong>To</strong>   <span id="'+uid+'_sT">—</span></span>',
+  '    <span><strong>Span</strong> <span id="'+uid+'_sS">—</span></span>',
+  '    <span><strong>Items</strong><span id="'+uid+'_sN">—</span></span>',
+  '  </div>',
+  '</div>',
 
-    /* ── Detail ── */
-    '<div class="tlw-det-header">',
-    '  <button id="'+uid+'_dtog" style="background:none;border:none;padding:0;cursor:pointer;display:flex;align-items:center">',
-    '    <span class="tlw-sec" style="vertical-align:middle">Detail</span>',
-    '    <span id="'+uid+'_dcaret" style="font-size:11px;color:#666;margin-left:4px">&#9660;</span>',
-    '  </button>',
-    '  <span class="tlw-hint">click item to focus · scroll to pan · ← → step items</span>',
-    '</div>',
-    '<div id="'+uid+'_dbody" style="overflow:hidden;transition:max-height .2s ease;max-height:'+(DTH+24)+'px">',
-    '  <div class="tlw-det-wrap tlw-cur-default" id="'+uid+'_dw">',
-    '    <canvas id="'+uid+'_detc" height="'+DTH+'"></canvas>',
-    '  </div>',
-    '  <div class="tlw-det-axis">',
-    '    <span id="'+uid+'_dL"></span><span id="'+uid+'_dM"></span><span id="'+uid+'_dR"></span>',
-    '  </div>',
-    '</div>',
+  '<div id="'+uid+'_benchout" style="display:none;margin-bottom:6px;font-size:11px;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px 10px"></div>',
 
-    '</div>'
+  /* ── Detail section ── */
+  '<div class="tlw-det-header">',
+  '  <button class="tlw-toggle-btn" id="'+uid+'_dtog" title="Collapse detail">',
+  '    <span class="tlw-sec">Detail</span>',
+  '    <span class="tlw-caret" id="'+uid+'_dcaret">&#9660;</span>',
+  '  </button>',
+  '  <span class="tlw-hint">click to focus · scroll pan · ← → step</span>',
+  '</div>',
+  '<div class="tlw-collapsible" id="'+uid+'_dbody" style="max-height:'+(DTH+24)+'px">',
+  '  <div class="tlw-det-wrap tlw-cur-default" id="'+uid+'_dw">',
+  '    <canvas id="'+uid+'_detc" height="'+DTH+'"></canvas>',
+  '  </div>',
+  '  <div class="tlw-det-axis">',
+  '    <span id="'+uid+'_dL"></span><span id="'+uid+'_dM"></span><span id="'+uid+'_dR"></span>',
+  '  </div>',
+  '</div>',
+
+  '</div>'
   ].join('');
+
   document.querySelector(this.ctnId).innerHTML=H;
 };
+
 TimelineWidget.prototype._el =function(s){ return document.getElementById(this.uid+'_'+s); };
 TimelineWidget.prototype._set=function(s,v){ var e=this._el(s); if(e) e.textContent=v; };
 
+/* ─── Destroy ─────────────────────────────────────────────────────────────── */
+TimelineWidget.prototype.destroy=function(){
+  // Remove document-level listeners
+  if(this._onDocMove) document.removeEventListener('mousemove',this._onDocMove);
+  if(this._onDocUp)   document.removeEventListener('mouseup',  this._onDocUp);
+  if(this._onDocKey)  document.removeEventListener('keydown',  this._onDocKey);
+  // Stop any running animation frames
+  this._stopEdge();
+  if(this._drawRAF){ cancelAnimationFrame(this._drawRAF); this._drawRAF=null; }
+  clearTimeout(this._syncTimer);
+  // Disconnect ResizeObserver
+  if(this._resizeObs){ this._resizeObs.disconnect(); this._resizeObs=null; }
+  // Detach Tabulator events
+  if(this.tbl){
+    try{ this.tbl.off('dataLoaded');   }catch(e){}
+    try{ this.tbl.off('dataFiltered'); }catch(e){}
+    try{ this.tbl.off('pageLoaded');   }catch(e){}
+    try{ this.tbl.off('rowClick');     }catch(e){}
+  }
+  // Null out large references
+  this.rows=[]; this.tbl=null;
+  var ctn=document.querySelector(this.ctnId);
+  if(ctn) ctn.innerHTML='';
+};
+
 /* ─── Table binding ───────────────────────────────────────────────────────── */
 TimelineWidget.prototype._waitForTable=function(attempt){
-  var self=this;
-  attempt=attempt||0;
+  var self=this; attempt=attempt||0;
   if(attempt>100){
-    console.error('TimelineWidget: table not found – check tableId "'+this.tableId+'"');
-    return;
+    console.error('TimelineWidget: table not found "'+this.tableId+'"'); return;
   }
   var tables=Tabulator.findTable(this.tableId);
   if(!tables||!tables.length){ setTimeout(function(){ self._waitForTable(attempt+1); },100); return; }
   this.tbl=tables[0];
-  this.tbl.on('dataLoaded',    function(){ setTimeout(function(){ self._ingest(); },80); });
-  this.tbl.on('dataFiltered',  function(){ setTimeout(function(){ self._ingestFiltered(); },80); });
-  this.tbl.on('pageLoaded',    function(){ if(self._suppressPageSync) return; self._onPageChange(); });
-  this.tbl.on('rowClick',      function(e,row){ self._onRowClick(row); });
-  setTimeout(function(){ self._ingest(); },120);
+  var tbl=this.tbl;
+  tbl.on('dataLoaded',   function(){ setTimeout(function(){ self._ingest(false); },80); });
+  tbl.on('dataFiltered', function(){ setTimeout(function(){ self._ingest(true);  },80); });
+  tbl.on('pageLoaded',   function(){ if(self._suppressPageSync) return; self._onPageChange(); });
+  tbl.on('rowClick',     function(e,row){ self._onRowClick(row); });
+  setTimeout(function(){ self._ingest(false); },120);
 };
 
-/* Full re-ingest — resets viewport */
-TimelineWidget.prototype._ingest=function(){
+/* ─── Data ingestion ──────────────────────────────────────────────────────── */
+TimelineWidget.prototype._ingest=function(isFilter){
   if(!this.tbl) return;
-  var raw=this.tbl.getData();
-  if(!raw||!raw.length) return;
-  this._buildRows(raw);
-  this.vS=0; this.vE=1; this.oS=0; this.oE=1;
-  this._draw();
-};
+  var raw=isFilter ? this.tbl.getData('active') : this.tbl.getData();
+  if(!raw||!raw.length){ this.rows=[]; this._draw(); return; }
 
-/* Filter re-ingest — preserves viewport where possible */
-TimelineWidget.prototype._ingestFiltered=function(){
-  if(!this.tbl) return;
-  var raw=this.tbl.getData('active');
-  if(!raw||!raw.length){
-    this.rows=[];
-    this._draw();
-    return;
-  }
   var oldGMin=this.gMin, oldGSpan=this.gSpan;
   var oldVS=this.vS, oldVE=this.vE;
+
   this._buildRows(raw);
-  // Re-express vS/vE in terms of new global span
-  if(oldGSpan>0&&this.gSpan>0){
-    var vsMs=oldGMin+oldVS*oldGSpan;
-    var veMs=oldGMin+oldVE*oldGSpan;
+
+  if(isFilter && oldGSpan>0 && this.gSpan>0){
+    // Preserve viewport in absolute time, re-express in new fractions
+    var vsMs=oldGMin+oldVS*oldGSpan, veMs=oldGMin+oldVE*oldGSpan;
     this.vS=clamp((vsMs-this.gMin)/this.gSpan,0,1);
     this.vE=clamp((veMs-this.gMin)/this.gSpan,0,1);
     if(this.vE-this.vS<this.MIN_BRUSH) this.vE=Math.min(1,this.vS+this.MIN_BRUSH);
-    this.oS=0; this.oE=1; // reset overview to show all filtered data
+    this.oS=0; this.oE=1;
   } else {
     this.vS=0; this.vE=1; this.oS=0; this.oE=1;
   }
@@ -263,19 +367,48 @@ TimelineWidget.prototype._ingestFiltered=function(){
 
 TimelineWidget.prototype._buildRows=function(raw){
   var self=this;
+  var keep=this.f_keep;
+  var fs=this.f_start, fe=this.f_end, fw=this.f_wave, fi=this.f_id;
+
+  // Build a field whitelist for raw data trimming
+  var keepSet=null;
+  if(keep&&keep.length){
+    keepSet={};
+    keep.forEach(function(k){ keepSet[k]=1; });
+    keepSet[fi]=1; keepSet[fs]=1; keepSet[fe]=1;
+    if(fw) keepSet[fw]=1;
+  }
+
   this.rows=raw.map(function(r){
+    var ts=toMs(r[fs]), te=toMs(r[fe]);
+    if(isNaN(ts)||isNaN(te)||te<ts) return null;
+
+    // Trim raw object to only the fields we need
+    var trimmed;
+    if(keepSet){
+      trimmed={};
+      var keys=Object.keys(r);
+      for(var k=0;k<keys.length;k++){
+        if(keepSet[keys[k]]) trimmed[keys[k]]=r[keys[k]];
+      }
+    } else {
+      trimmed=r;
+    }
+
     return {
-      id : String(r[self.f_id]),
-      ts : toMs(r[self.f_start]),
-      te : toMs(r[self.f_end]),
-      svg: self.f_wave?(r[self.f_wave]||null):null,
-      raw: r
+      id : String(r[fi]),
+      ts : ts,
+      te : te,
+      dur: te-ts,
+      svg: fw ? parseSVG(r[fw]||null) : null,  // pre-parsed once
+      raw: trimmed
     };
-  }).filter(function(r){ return !isNaN(r.ts)&&!isNaN(r.te)&&r.te>=r.ts; })
+  }).filter(Boolean)
     .sort(function(a,b){ return a.ts-b.ts; });
+
   if(!this.rows.length) return;
   this.gMin  = this.rows[0].ts;
-  this.gMax  = Math.max.apply(null,this.rows.map(function(r){return r.te;}));
+  this.gMax  = this.rows.reduce(function(m,r){ return r.te>m?r.te:m; }, this.rows[0].te);
   this.gSpan = this.gMax-this.gMin||1;
 };
 
@@ -291,8 +424,7 @@ TimelineWidget.prototype._px2f=function(px){
   return this.oS+((px-pad)/(W-pad*2))*(this.oE-this.oS);
 };
 TimelineWidget.prototype._mPx=function(e){
-  var rc=this._el('ov').getBoundingClientRect();
-  return clamp(e.clientX-rc.left,0,rc.width);
+  return clamp(e.clientX-this._el('ov').getBoundingClientRect().left, 0, this._ovW());
 };
 TimelineWidget.prototype._gf=function(ts){ return clamp((ts-this.gMin)/this.gSpan,0,1); };
 
@@ -300,8 +432,7 @@ TimelineWidget.prototype._gf=function(ts){ return clamp((ts-this.gMin)/this.gSpa
 TimelineWidget.prototype._scrollOvToBrush=function(){
   var mid=(this.vS+this.vE)/2, ow=this.oE-this.oS;
   if(mid<this.oS||mid>this.oE){
-    this.oS=clamp(mid-ow/2,0,1-ow);
-    this.oE=this.oS+ow;
+    this.oS=clamp(mid-ow/2,0,1-ow); this.oE=this.oS+ow;
   }
 };
 TimelineWidget.prototype._zoomToRows=function(rows){
@@ -321,20 +452,29 @@ TimelineWidget.prototype._focusRow=function(r){
   this.vS=clamp((r.ts-pad-this.gMin)/this.gSpan,0,1);
   this.vE=clamp((r.te+pad-this.gMin)/this.gSpan,0,1);
   this.focusId=r.id;
-  this._scrollOvToBrush();
-  if(!this.detOpen) this._toggleDet();
+  // Centre overview on item
+  var frac=this._gf((r.ts+r.te)/2);
+  var ow=this.oE-this.oS;
+  this.oS=clamp(frac-ow/2,0,1-ow); this.oE=this.oS+ow;
+  if(!this.detOpen) this._toggleSection('det');
   this._draw();
   this._highlightRow(r.id);
-  this._syncTableToView();
+  if(this.autoSync) this._scheduleSyncTable();
 };
 
-/* ─── Page / table sync ───────────────────────────────────────────────────── */
+/* ─── Table sync ──────────────────────────────────────────────────────────── */
+TimelineWidget.prototype._scheduleSyncTable=function(){
+  if(!this.autoSync) return;
+  clearTimeout(this._syncTimer);
+  var self=this;
+  this._syncTimer=setTimeout(function(){ self._syncTableToView(); },250);
+};
 TimelineWidget.prototype._getPageRows=function(){
   if(!this.tbl) return [];
   try{
     var active=this.tbl.getData('active');
     var ps=this.tbl.getPageSize()||25, pg=Math.max(1,this.tbl.getPage()||1);
-    var self=this, f=this.f_id, ids={};
+    var f=this.f_id, ids={};
     active.slice((pg-1)*ps,pg*ps).forEach(function(r){ ids[String(r[f])]=1; });
     return this.rows.filter(function(r){ return !!ids[r.id]; });
   }catch(e){ return []; }
@@ -345,25 +485,57 @@ TimelineWidget.prototype._onPageChange=function(){
   this._zoomToRows(pr); this._draw();
 };
 TimelineWidget.prototype._syncTableToView=function(){
-  if(!this.tbl) return;
+  if(!this.tbl||!this.autoSync) return;
   var self=this;
   var vs=this.gMin+this.vS*this.gSpan, ve=this.gMin+this.vE*this.gSpan;
-  var hit=this.rows.filter(function(r){ return r.te>vs&&r.ts<ve; });
+  // Find first row in view that exists in the active (filtered) dataset
+  var active=this.tbl.getData('active');
+  var f=this.f_id, activeIds={};
+  active.forEach(function(r){ activeIds[String(r[f])]=1; });
+  var hit=this.rows.filter(function(r){ return r.te>vs&&r.ts<ve&&activeIds[r.id]; });
   if(!hit.length) return;
+
+  // If focusId is in view, prefer it for page targeting
   var targetId=hit[0].id;
+  if(this.focusId){
+    for(var i=0;i<hit.length;i++){ if(hit[i].id===String(this.focusId)){ targetId=hit[i].id; break; } }
+  }
+
   try{
-    var active=this.tbl.getData('active');
-    var ps=this.tbl.getPageSize()||25, f=this.f_id, idx=-1;
-    for(var i=0;i<active.length;i++){ if(String(active[i][f])===targetId){idx=i;break;} }
+    var ps=this.tbl.getPageSize()||25, idx=-1;
+    for(var j=0;j<active.length;j++){ if(String(active[j][f])===targetId){ idx=j; break; } }
     if(idx<0) return;
     var tp=Math.floor(idx/ps)+1, cp=this.tbl.getPage();
-    if(tp===cp){ self._drawDet(); return; }
+    if(tp===cp){
+      // Already on right page — scroll focused row to top of table
+      self._scrollRowIntoView(targetId);
+      return;
+    }
     this._suppressPageSync=true;
-    this.tbl.setPage(tp).then(function(){ self._suppressPageSync=false; self._drawDet(); });
+    this.tbl.setPage(tp).then(function(){
+      self._suppressPageSync=false;
+      self._scrollRowIntoView(targetId);
+    });
   }catch(e){ this._suppressPageSync=false; }
 };
+
+TimelineWidget.prototype._scrollRowIntoView=function(id){
+  // Scroll the highlighted row to top of Tabulator's scroll area
+  if(!this.tbl) return;
+  try{
+    var f=this.f_id, self=this;
+    var rows=this.tbl.getRows();
+    for(var i=0;i<rows.length;i++){
+      if(String(rows[i].getData()[f])===id){
+        rows[i].scrollTo('top',true);
+        break;
+      }
+    }
+  }catch(e){}
+};
+
 TimelineWidget.prototype._onRowClick=function(row){
-  var rd=row.getData(), id=String(rd[this.f_id]);
+  var id=String(row.getData()[this.f_id]);
   var match=this._rowById(id);
   if(!match) return;
   this._focusRow(match);
@@ -377,38 +549,29 @@ TimelineWidget.prototype._detailRows=function(){
   return inView.filter(function(r){ return !!pageIds[r.id]; });
 };
 
-/* ─── Colour ──────────────────────────────────────────────────────────────── */
-var BAR_CLR='#6baed6';
-
 /* ─── Overview draw ───────────────────────────────────────────────────────── */
 TimelineWidget.prototype._drawOv=function(){
+  if(!this.ovOpen) return;
   var cv=this._el('ovc');
   var W=this._ovW(); cv.width=W; cv.height=this.OV_H;
   var ctx=cv.getContext('2d'); ctx.clearRect(0,0,W,this.OV_H);
   if(!this.rows.length) return;
 
-  var self=this;
-  var pad=this.OV_PAD;
-  var OVH=this.OV_H;
-  var BAR_TOP=this.OV_BAR_TOP;
-  var BAR_H  =this.OV_BAR_H;
-  var RULER_Y=this.OV_RULER;
-  var MERGE  =this.MERGE_PX;
+  var self=this, pad=this.OV_PAD, OVH=this.OV_H;
+  var BAR_TOP=this.OV_BAR_TOP, BAR_H=this.OV_BAR_H;
+  var RULER_Y=this.OV_RULER, MERGE=this.MERGE_PX;
+  var os=this.gMin+this.oS*this.gSpan, oe=this.gMin+this.oE*this.gSpan;
 
-  /* ── Top anchor labels (L / M / R) drawn inside canvas ── */
-  var os=this.gMin+this.oS*this.gSpan;
-  var oe=this.gMin+this.oE*this.gSpan;
+  // ── Anchor labels at top ──
   ctx.save();
-  ctx.font='bold 10px sans-serif';
-  ctx.fillStyle='#222';
-  ctx.textBaseline='top';
-  ctx.textAlign='left';  ctx.fillText(fmtD(os), pad, 2);
-  ctx.textAlign='center';ctx.fillText(fmtD((os+oe)/2), W/2, 2);
-  ctx.textAlign='right'; ctx.fillText(fmtD(oe), W-pad, 2);
+  ctx.font='bold 10px sans-serif'; ctx.fillStyle='#222'; ctx.textBaseline='top';
+  ctx.textAlign='left';   ctx.fillText(fmtD(os),       pad,   2);
+  ctx.textAlign='center'; ctx.fillText(fmtD((os+oe)/2),W/2,   2);
+  ctx.textAlign='right';  ctx.fillText(fmtD(oe),       W-pad, 2);
   ctx.restore();
 
-  /* ── Bar strip ── */
-  var intervals=[];
+  // ── Coalescing bar intervals ──
+  var intervals=[], focId=String(this.focusId);
   this.rows.forEach(function(r){
     var f1=self._gf(r.ts), f2=self._gf(r.te);
     if(f2<self.oS||f1>self.oE) return;
@@ -417,38 +580,46 @@ TimelineWidget.prototype._drawOv=function(){
     if(x2<x1+1) x2=x1+1;
     intervals.push({x1:x1,x2:x2,id:r.id});
   });
-  intervals.sort(function(a,b){ return a.x1-b.x1; });
+  // Already sorted by ts (rows are sorted), so intervals are nearly sorted
+  // A single insertion-sort pass is cheaper than Array.sort for nearly-sorted data
+  for(var ii=1;ii<intervals.length;ii++){
+    var iv=intervals[ii], jj=ii-1;
+    while(jj>=0&&intervals[jj].x1>iv.x1){ intervals[jj+1]=intervals[jj]; jj--; }
+    intervals[jj+1]=iv;
+  }
   var merged=[];
-  intervals.forEach(function(iv){
-    if(!merged.length){ merged.push({x1:iv.x1,x2:iv.x2,ids:[iv.id]}); return; }
+  for(var mi=0;mi<intervals.length;mi++){
+    var cur=intervals[mi];
+    if(!merged.length){ merged.push({x1:cur.x1,x2:cur.x2,ids:[cur.id]}); continue; }
     var last=merged[merged.length-1];
-    if(iv.x1-last.x2<=MERGE){ last.x2=Math.max(last.x2,iv.x2); last.ids.push(iv.id); }
-    else merged.push({x1:iv.x1,x2:iv.x2,ids:[iv.id]});
-  });
+    if(cur.x1-last.x2<=MERGE){ last.x2=Math.max(last.x2,cur.x2); last.ids.push(cur.id); }
+    else merged.push({x1:cur.x1,x2:cur.x2,ids:[cur.id]});
+  }
 
-  var focId=String(this.focusId);
-  merged.forEach(function(m){
-    var isFocus=m.ids.indexOf(focId)>=0;
-    var solo=m.ids.length===1;
-    var w=m.x2-m.x1;
+  var BAR_CLR=this._cssVar('--tlw-bar','#6baed6');
+  var BAR_FOC=this._cssVar('--tlw-bar-focus','#2171b5');
+  for(var bi=0;bi<merged.length;bi++){
+    var m=merged[bi];
+    var isFocus=m.ids.indexOf(focId)>=0, solo=m.ids.length===1;
+    var bw=m.x2-m.x1;
     ctx.fillStyle=BAR_CLR+(isFocus?'ff':solo?'cc':'99');
-    ctx.fillRect(m.x1,BAR_TOP,w,BAR_H);
-    if(solo){ ctx.fillStyle=BAR_CLR+'ff'; ctx.fillRect(m.x1,BAR_TOP,w,2); }
+    ctx.fillRect(m.x1,BAR_TOP,bw,BAR_H);
+    if(solo){ ctx.fillStyle=BAR_CLR+'ff'; ctx.fillRect(m.x1,BAR_TOP,bw,2); }
     if(isFocus){
-      ctx.strokeStyle='#2171b5'; ctx.lineWidth=1.5;
-      ctx.strokeRect(m.x1+0.5,BAR_TOP+0.5,w-1,BAR_H-1);
+      ctx.strokeStyle=BAR_FOC; ctx.lineWidth=1.5;
+      ctx.strokeRect(m.x1+0.5,BAR_TOP+0.5,bw-1,BAR_H-1);
     }
-  });
+  }
 
-  /* Median line */
+  // Median line
   var MID_Y=Math.round(BAR_TOP+BAR_H/2);
   ctx.strokeStyle='rgba(107,174,214,0.35)'; ctx.lineWidth=1;
   ctx.beginPath(); ctx.moveTo(pad,MID_Y); ctx.lineTo(W-pad,MID_Y); ctx.stroke();
 
-  /* ── Tick ruler ── */
-  this._drawTicks(ctx,W,pad,RULER_Y);
+  // ── Tick ruler ──
+  this._drawTicks(ctx,W,pad,RULER_Y,os,oe);
 
-  /* ── Time brush ── */
+  // ── Time brush overlay ──
   var bx1=clamp(Math.round(this._f2px(this.vS)),0,W);
   var bx2=clamp(Math.round(this._f2px(this.vE)),0,W);
   ctx.fillStyle='rgba(51,122,183,0.10)';
@@ -459,68 +630,73 @@ TimelineWidget.prototype._drawOv=function(){
   this._drawHandle(ctx,bx1,BAR_TOP+BAR_H/2);
   this._drawHandle(ctx,bx2,BAR_TOP+BAR_H/2);
 
-  /* DOM brush div for cursor detection */
+  // DOM brush div
   var br=this._el('br');
   br.style.left=bx1+'px'; br.style.width=Math.max(4,bx2-bx1)+'px';
   br.style.top='0'; br.style.height=OVH+'px';
 
-  /* Update tooltip */
+  // Tooltip
   var vs=this.gMin+this.vS*this.gSpan, ve=this.gMin+this.vE*this.gSpan;
-  this._el('tip').textContent=fmtD(vs)+' \u2192 '+fmtD(ve)+' ('+fmtS(ve-vs)+')';
+  this._el('tip').textContent=fmtD(vs)+'\u2009\u2192\u2009'+fmtD(ve)+'\u2009('+fmtS(ve-vs)+')';
+};
+
+// Helper to read a CSS custom property from the widget's own element
+TimelineWidget.prototype._cssVar=function(name,fallback){
+  var el=document.getElementById(this.uid);
+  if(!el) return fallback;
+  var v=getComputedStyle(el).getPropertyValue(name).trim();
+  return v||fallback;
 };
 
 /* ─── Tick ruler ──────────────────────────────────────────────────────────── */
-TimelineWidget.prototype._drawTicks=function(ctx,W,pad,RULER_Y){
-  if(!this.rows.length) return;
-  var os=this.gMin+this.oS*this.gSpan;
-  var oe=this.gMin+this.oE*this.gSpan;
+TimelineWidget.prototype._drawTicks=function(ctx,W,pad,RULER_Y,os,oe){
   var span=oe-os||1;
-
   var NICE=[100,200,500,1000,2000,5000,10000,15000,30000,
-    60000,120000,300000,600000,1800000,
-    3600000,7200000,21600000,43200000,
-    86400000,172800000,604800000];
+    60000,120000,300000,600000,1800000,3600000,7200000,
+    21600000,43200000,86400000,172800000,604800000];
   var interval=NICE[NICE.length-1];
-  for(var ni=0;ni<NICE.length;ni++){
-    if(span/NICE[ni]<=7){ interval=NICE[ni]; break; }
-  }
+  for(var ni=0;ni<NICE.length;ni++){ if(span/NICE[ni]<=7){ interval=NICE[ni]; break; } }
   var minor=interval/5;
-
-  var MAJ_H=5, MIN_H=3;
-  // Labels sit ABOVE the baseline (baseline at RULER_Y, labels above)
-  var LBL_Y=RULER_Y-MAJ_H-12; // label top — 10px font + 2px gap above tick top
+  var MAJ_H=5, LBL_Y=RULER_Y-MAJ_H-12;
+  var useW=W-pad*2;
 
   ctx.save();
-  ctx.font='bold 10px sans-serif';
-  ctx.textAlign='center';
-  ctx.textBaseline='top';
+  ctx.font='bold 10px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='top';
 
-  /* Ruler baseline */
+  // Baseline
   ctx.strokeStyle='rgba(80,80,80,0.5)'; ctx.lineWidth=1;
   ctx.beginPath(); ctx.moveTo(pad,RULER_Y); ctx.lineTo(W-pad,RULER_Y); ctx.stroke();
 
-  /* Minor ticks — hang downward from baseline */
+  // Minor ticks — batch into one path
   ctx.strokeStyle='rgba(120,120,120,0.5)'; ctx.lineWidth=1;
+  ctx.beginPath();
   var t0m=Math.ceil(os/minor)*minor;
   for(var tm=t0m;tm<=oe;tm+=minor){
-    var xm=pad+(tm-os)/span*(W-pad*2);
+    var xm=pad+(tm-os)/span*useW;
     if(xm<pad||xm>W-pad) continue;
-    ctx.beginPath(); ctx.moveTo(xm,RULER_Y); ctx.lineTo(xm,RULER_Y+MIN_H); ctx.stroke();
+    ctx.moveTo(xm,RULER_Y); ctx.lineTo(xm,RULER_Y+3);
   }
+  ctx.stroke();
 
-  /* Major ticks + labels */
+  // Major ticks + labels — batch ticks into one path
   ctx.strokeStyle='rgba(40,40,40,0.8)'; ctx.lineWidth=1.5;
-  ctx.fillStyle='#222';
+  ctx.beginPath();
   var t0=Math.ceil(os/interval)*interval;
+  var majXs=[];
   for(var t=t0;t<=oe;t+=interval){
-    var x=pad+(t-os)/span*(W-pad*2);
+    var x=pad+(t-os)/span*useW;
     if(x<pad||x>W-pad) continue;
-    // Tick goes both up (short) and down from baseline
-    ctx.beginPath(); ctx.moveTo(x,RULER_Y-MAJ_H); ctx.lineTo(x,RULER_Y+2); ctx.stroke();
-    var lbl=this._tickLabel(t,interval);
-    if(x>pad+22&&x<W-pad-22) ctx.fillText(lbl,x,LBL_Y);
+    ctx.moveTo(x,RULER_Y-MAJ_H); ctx.lineTo(x,RULER_Y+2);
+    majXs.push({x:x,t:t});
   }
+  ctx.stroke();
 
+  // Labels (separate loop so we set fillStyle once)
+  ctx.fillStyle='#222';
+  for(var li=0;li<majXs.length;li++){
+    var lx=majXs[li].x;
+    if(lx>pad+22&&lx<W-pad-22) ctx.fillText(this._tickLabel(majXs[li].t,interval),lx,LBL_Y);
+  }
   ctx.restore();
 };
 
@@ -540,114 +716,59 @@ TimelineWidget.prototype._drawDet=function(){
   if(!this.rows.length) return;
 
   var DTH=this.DET_H;
-  var vs=this.gMin+this.vS*this.gSpan;
-  var ve=this.gMin+this.vE*this.gSpan;
-  var sp=ve-vs||1;
-  var self=this;
+  var vs=this.gMin+this.vS*this.gSpan, ve=this.gMin+this.vE*this.gSpan;
+  var sp=ve-vs||1, self=this;
   var focId=String(this.focusId);
-  var MWPX=this.MIN_WAVE_PX;
-  var PAD_Y=4;
+  var MWPX=this.MIN_WAVE_PX, PAD_Y=4;
+  var itemH=DTH-PAD_Y*2;
+  var BAR_CLR=this._cssVar('--tlw-bar','#6baed6');
+  var BAR_FOC=this._cssVar('--tlw-bar-focus','#2171b5');
 
-  /* Grid lines */
-  ctx.strokeStyle='#ececec'; ctx.lineWidth=1;
-  [1,2,3].forEach(function(i){
-    ctx.beginPath(); ctx.moveTo(W/4*i,0); ctx.lineTo(W/4*i,DTH); ctx.stroke();
-  });
+  // Grid
+  ctx.strokeStyle=this._cssVar('--tlw-grid','#ececec'); ctx.lineWidth=1;
+  ctx.beginPath();
+  [1,2,3].forEach(function(i){ ctx.moveTo(W/4*i,0); ctx.lineTo(W/4*i,DTH); });
+  ctx.stroke();
 
   var rows=this._detailRows();
   rows.forEach(function(r){
-    // Use true item bounds (not clamped) for position/width — waveform clips naturally
-    var x1=(r.ts-vs)/sp*W;
-    var x2=(r.te-vs)/sp*W;
-    var bw=x2-x1;
+    var x1=(r.ts-vs)/sp*W, x2=(r.te-vs)/sp*W, bw=x2-x1;
     if(bw<1) return;
 
     var isFocus=(r.id===focId);
-    var itemH=DTH-PAD_Y*2;
-
-    // Clip to visible canvas only — prevents waveform edge distortion
-    var clipX1=Math.max(0,x1);
-    var clipW =Math.min(W,x2)-clipX1;
+    var clipX1=Math.max(0,x1), clipW=Math.min(W,x2)-clipX1;
     if(clipW<1) return;
 
     ctx.save();
     ctx.beginPath(); ctx.rect(clipX1,PAD_Y,clipW,itemH); ctx.clip();
 
-    /* Background */
     ctx.fillStyle=BAR_CLR+(isFocus?'28':'18');
     ctx.fillRect(x1,PAD_Y,bw,itemH);
 
-    /* Left edge accent */
     if(x1>=0&&x1<W){
       ctx.fillStyle=BAR_CLR+(isFocus?'ff':'cc');
       ctx.fillRect(x1,PAD_Y,Math.min(2,bw),itemH);
     }
 
-    /* Waveform — draw at TRUE x1 with full bw so SVG isn't compressed */
     if(r.svg&&bw>=MWPX){
-      ctx.strokeStyle=BAR_CLR+'cc';
-      ctx.lineWidth=1.3;
-      self._svgToCanvas(ctx,r.svg,x1,PAD_Y,bw,itemH);
+      ctx.strokeStyle=BAR_CLR+'cc'; ctx.lineWidth=1.3;
+      renderSVG(ctx,r.svg,x1,PAD_Y,bw,itemH);
       waveCount++;
     }
 
     ctx.restore();
 
-    /* Focus ring */
     if(isFocus){
-      ctx.strokeStyle='#2171b5'; ctx.lineWidth=2;
+      ctx.strokeStyle=BAR_FOC; ctx.lineWidth=2;
       ctx.strokeRect(clipX1+1,PAD_Y+1,clipW-2,itemH-2);
     }
-
-    /* Divider at right edge */
     if(x2>0&&x2<W&&bw>4){
       ctx.strokeStyle='rgba(255,255,255,0.7)'; ctx.lineWidth=1;
       ctx.beginPath(); ctx.moveTo(x2,PAD_Y); ctx.lineTo(x2,PAD_Y+itemH); ctx.stroke();
     }
   });
 
-  this._lastDrawMs=performance.now()-t0;
-  this._lastWaveCount=waveCount;
-  if(this._benchSamples) this._benchSamples.push({ms:this._lastDrawMs,waves:waveCount});
-};
-
-/* ─── SVG → Canvas ────────────────────────────────────────────────────────── */
-TimelineWidget.prototype._svgToCanvas=function(ctx,svg,x,y,w,h){
-  var vb=svg.match(/viewBox=["'][^"']*["']/);
-  var svgW=400, svgH=80;
-  if(vb){
-    var p=vb[0].replace(/viewBox=["']/,'').replace(/["']/,'').trim().split(/[\s,]+/);
-    svgW=parseFloat(p[2])||400; svgH=parseFloat(p[3])||80;
-  }
-  var sx=w/svgW, sy=h/svgH;
-  var pd=svg.match(/\bd=["']([^"']+)["']/);
-  if(pd){
-    var cmds=pd[1].match(/[MmLlCcQqZz][^MmLlCcQqZz]*/g)||[];
-    var curX=x, curY=y;
-    ctx.beginPath();
-    cmds.forEach(function(cmd){
-      var t=cmd[0];
-      var nums=(cmd.slice(1).trim().match(/-?[\d.eE+-]+/g)||[]).map(Number);
-      if(t==='M'&&nums.length>=2){
-        for(var i=0;i+1<nums.length;i+=2){ curX=x+nums[i]*sx; curY=y+nums[i+1]*sy; ctx.moveTo(curX,curY); }
-      }else if(t==='L'&&nums.length>=2){
-        for(var i=0;i+1<nums.length;i+=2){ curX=x+nums[i]*sx; curY=y+nums[i+1]*sy; ctx.lineTo(curX,curY); }
-      }else if(t==='m'&&nums.length>=2){
-        for(var i=0;i+1<nums.length;i+=2){ curX+=nums[i]*sx; curY+=nums[i+1]*sy; ctx.moveTo(curX,curY); }
-      }else if(t==='l'&&nums.length>=2){
-        for(var i=0;i+1<nums.length;i+=2){ curX+=nums[i]*sx; curY+=nums[i+1]*sy; ctx.lineTo(curX,curY); }
-      }else if(t==='Z'||t==='z'){ ctx.closePath(); }
-    });
-    ctx.stroke(); return;
-  }
-  var pp=svg.match(/points=["']([^"']+)["']/);
-  if(pp){
-    var nums=(pp[1].trim().match(/-?[\d.eE+-]+/g)||[]).map(Number);
-    ctx.beginPath();
-    for(var i=0;i+1<nums.length;i+=2)
-      i===0?ctx.moveTo(x+nums[i]*sx,y+nums[i+1]*sy):ctx.lineTo(x+nums[i]*sx,y+nums[i+1]*sy);
-    ctx.stroke();
-  }
+  if(this._benchSamples) this._benchSamples.push({ms:performance.now()-t0,waves:waveCount});
 };
 
 /* ─── Handle drawing ──────────────────────────────────────────────────────── */
@@ -684,11 +805,20 @@ TimelineWidget.prototype._drawLabels=function(){
   var sl=this._el('zslide'); if(sl) sl.value=clamp(lvl,1,200);
 };
 
-/* ─── Master draw ─────────────────────────────────────────────────────────── */
+/* ─── Master draw — throttled to one rAF per call site ───────────────────── */
 TimelineWidget.prototype._draw=function(){
-  this._drawOv();
-  this._drawDet();
-  this._drawLabels();
+  if(this._drawRAF) return; // already queued
+  var self=this;
+  this._drawRAF=requestAnimationFrame(function(){
+    self._drawRAF=null;
+    self._drawOv();
+    self._drawDet();
+    self._drawLabels();
+  });
+};
+// Synchronous draw used during drag (we need immediate feedback)
+TimelineWidget.prototype._drawSync=function(){
+  this._drawOv(); this._drawDet(); this._drawLabels();
 };
 
 /* ─── Row helpers ─────────────────────────────────────────────────────────── */
@@ -704,16 +834,30 @@ TimelineWidget.prototype._highlightRow=function(id){
       try{ this._lastHighlightedRow.getElement().classList.remove('tlw-row-hi'); }catch(e){}
       this._lastHighlightedRow=null;
     }
-    var found=this.tbl.getRows().filter(function(r){ return String(r.getData()[f])===id; });
-    if(found.length){ found[0].getElement().classList.add('tlw-row-hi'); this._lastHighlightedRow=found[0]; }
+    var rows=this.tbl.getRows();
+    for(var i=0;i<rows.length;i++){
+      if(String(rows[i].getData()[f])===id){
+        rows[i].getElement().classList.add('tlw-row-hi');
+        this._lastHighlightedRow=rows[i];
+        break;
+      }
+    }
   }catch(e){}
 };
 
 /* ─── UI state ────────────────────────────────────────────────────────────── */
-TimelineWidget.prototype._toggleDet=function(){
-  this.detOpen=!this.detOpen;
-  this._el('dbody').style.maxHeight=this.detOpen?(this.DET_H+24)+'px':'0';
-  this._el('dcaret').innerHTML=this.detOpen?'&#9660;':'&#9654;';
+TimelineWidget.prototype._toggleSection=function(which){
+  if(which==='ov'){
+    this.ovOpen=!this.ovOpen;
+    this._el('ovbody').style.maxHeight=this.ovOpen?this.OV_H+'px':'0';
+    this._el('ovcaret').innerHTML=this.ovOpen?'&#9660;':'&#9654;';
+    // Show/hide toolbar only when overview is also hidden
+    this._el('tb').style.display=this.ovOpen?'':'none';
+  } else {
+    this.detOpen=!this.detOpen;
+    this._el('dbody').style.maxHeight=this.detOpen?(this.DET_H+24)+'px':'0';
+    this._el('dcaret').innerHTML=this.detOpen?'&#9660;':'&#9654;';
+  }
 };
 TimelineWidget.prototype._setScope=function(s){
   this.scope=s;
@@ -730,20 +874,17 @@ TimelineWidget.prototype._viewZoom=function(f){
   this._scrollOvToBrush(); this._draw();
 };
 TimelineWidget.prototype._ovZoom=function(f){
-  /* Pivot on the brush midpoint so selection stays centred */
   var pivot=(this.vS+this.vE)/2;
   var ow=this.oE-this.oS, nw=clamp(ow*f,0.005,1);
   var ratio=(pivot-this.oS)/ow;
-  this.oS=clamp(pivot-ratio*nw,0,1-nw);
-  this.oE=this.oS+nw;
+  this.oS=clamp(pivot-ratio*nw,0,1-nw); this.oE=this.oS+nw;
   this._draw();
 };
 TimelineWidget.prototype._ovFull=function(){ this.oS=0;this.oE=1;this._draw(); };
 TimelineWidget.prototype._ovSlide=function(v){
   var w=clamp(1/Math.max(1,parseFloat(v)),0.005,1);
   var c=(this.oS+this.oE)/2;
-  this.oS=clamp(c-w/2,0,1-w); this.oE=this.oS+w;
-  this._draw();
+  this.oS=clamp(c-w/2,0,1-w); this.oE=this.oS+w; this._draw();
 };
 
 /* ─── Edge pan ────────────────────────────────────────────────────────────── */
@@ -755,8 +896,7 @@ TimelineWidget.prototype._startEdge=function(dir){
   var self=this;
   (function step(){
     var w=self.oE-self.oS;
-    self.oS=clamp(self.oS+dir*self.ESPD,0,1-w);
-    self.oE=self.oS+w;
+    self.oS=clamp(self.oS+dir*self.ESPD,0,1-w); self.oE=self.oS+w;
     self._drawOv(); self._drawLabels();
     self.edgeRAF=requestAnimationFrame(step);
   })();
@@ -764,23 +904,21 @@ TimelineWidget.prototype._startEdge=function(dir){
 
 /* ─── Benchmark ───────────────────────────────────────────────────────────── */
 TimelineWidget.prototype._runBenchmark=function(){
-  var self=this;
-  var btn=this._el('bench'), out=this._el('benchout');
-  btn.disabled=true;
-  out.style.display='block'; out.innerHTML='<em>Benchmarking…</em>';
-  var STEPS=30, origLazy=this.lazyWave, origVS=this.vS, origVE=this.vE, W=this.vE-this.vS;
+  var self=this, btn=this._el('bench'), out=this._el('benchout');
+  btn.disabled=true; out.style.display='block'; out.innerHTML='<em>Running…</em>';
+  var STEPS=30, origLazy=this.lazyWave, origVS=this.vS, origVE=this.vE, BW=this.vE-this.vS;
   function runPass(lazy,done){
     self.lazyWave=lazy; self._benchSamples=[];
     var step=0;
     (function frame(){
       var pos=step/STEPS;
-      self.vS=clamp(pos*(1-W),0,1-W); self.vE=self.vS+W;
+      self.vS=clamp(pos*(1-BW),0,1-BW); self.vE=self.vS+BW;
       self._drawDet(); step++;
       if(step<=STEPS) requestAnimationFrame(frame); else done(self._benchSamples.slice());
     })();
   }
   function stats(s){
-    if(!s.length) return {med:0,min:0,max:0,waves:0};
+    if(!s.length) return {med:'0',min:'0',max:'0',waves:0};
     var ms=s.map(function(x){return x.ms;}).sort(function(a,b){return a-b;});
     return {med:ms[Math.floor(ms.length/2)].toFixed(2),min:ms[0].toFixed(2),
             max:ms[ms.length-1].toFixed(2),
@@ -791,27 +929,21 @@ TimelineWidget.prototype._runBenchmark=function(){
     return '<div style="height:8px;background:#e9ecef;border-radius:3px;margin:2px 0 5px">'
           +'<div style="height:100%;width:'+pct+'%;border-radius:3px;background:#6baed6"></div></div>';
   }
-  runPass(false,function(off_s){
-    runPass(true,function(on_s){
+  runPass(false,function(o){
+    runPass(true,function(n){
       self.lazyWave=origLazy; self.vS=origVS; self.vE=origVE;
-      self._draw(); self._benchSamples=null;
-      btn.disabled=false;
-      var off=stats(off_s), on=stats(on_s);
-      var mx=Math.max(parseFloat(off.med),parseFloat(on.med),1)*1.3;
+      self._draw(); self._benchSamples=null; btn.disabled=false;
+      var off=stats(o), on=stats(n), mx=Math.max(parseFloat(off.med),parseFloat(on.med),1)*1.3;
       var spd=(parseFloat(off.med)/Math.max(parseFloat(on.med),0.01)).toFixed(1);
       out.innerHTML='<strong>Draw benchmark</strong>'
         +'<table style="width:100%;margin-top:4px;font-size:11px;border-collapse:collapse">'
-        +'<tr><th></th><th style="color:#555">Median</th><th style="color:#555">Min</th>'
-        +'<th style="color:#555">Max</th><th style="color:#555">Waves/frame</th></tr>'
-        +'<tr><td><strong>Lazy OFF</strong></td><td>'+off.med+'ms</td><td style="color:#999">'+off.min+'ms</td>'
-        +'<td style="color:#999">'+off.max+'ms</td><td>'+off.waves+'</td></tr>'
+        +'<tr><th></th><th>Median</th><th>Min</th><th>Max</th><th>Waves/frame</th></tr>'
+        +'<tr><td><strong>Lazy OFF</strong></td><td>'+off.med+'ms</td><td>'+off.min+'ms</td><td>'+off.max+'ms</td><td>'+off.waves+'</td></tr>'
         +'<tr><td colspan="5">'+bar(off.med,mx)+'</td></tr>'
-        +'<tr><td><strong>Lazy ON</strong></td><td>'+on.med+'ms</td><td style="color:#999">'+on.min+'ms</td>'
-        +'<td style="color:#999">'+on.max+'ms</td><td>'+on.waves+'</td></tr>'
+        +'<tr><td><strong>Lazy ON </strong></td><td>'+on.med+'ms</td><td>'+on.min+'ms</td><td>'+on.max+'ms</td><td>'+on.waves+'</td></tr>'
         +'<tr><td colspan="5">'+bar(on.med,mx)+'</td></tr>'
         +'</table>'
-        +'<div style="margin-top:3px;padding:3px 7px;background:#f8f9fa;border-radius:3px">'
-        +'&#9889; Lazy is <strong>'+spd+'x faster</strong></div>';
+        +'<em>Lazy is '+spd+'x faster</em>';
     });
   });
 };
@@ -821,7 +953,8 @@ TimelineWidget.prototype._bindDOM=function(){
   var self=this;
   var ov=this._el('ov');
 
-  this._el('dtog') .addEventListener('click',function(){ self._toggleDet(); });
+  this._el('ovtog').addEventListener('click',function(){ self._toggleSection('ov');  });
+  this._el('dtog') .addEventListener('click',function(){ self._toggleSection('det'); });
   this._el('v2')   .addEventListener('click',function(){ self._viewZoom(2);  });
   this._el('v5')   .addEventListener('click',function(){ self._viewZoom(5);  });
   this._el('v10')  .addEventListener('click',function(){ self._viewZoom(10); });
@@ -829,32 +962,30 @@ TimelineWidget.prototype._bindDOM=function(){
   this._el('sAll') .addEventListener('click',function(){ self._setScope('all');  });
   this._el('sPage').addEventListener('click',function(){ self._setScope('page'); });
   this._el('bench').addEventListener('click',function(){ self._runBenchmark(); });
-  this._el('lazy') .addEventListener('change',function(){ self.lazyWave=this.checked; self._draw(); });
   this._el('zin')  .addEventListener('click',function(){ self._ovZoom(0.5); });
   this._el('zout') .addEventListener('click',function(){ self._ovZoom(2);   });
-  this._el('zfull').addEventListener('click',function(){ self._ovFull();    });
+  this._el('zall') .addEventListener('click',function(){ self._ovFull();    });
   this._el('zslide').addEventListener('input',function(){ self._ovSlide(this.value); });
+  this._el('lazy') .addEventListener('change',function(){ self.lazyWave=this.checked; self._draw(); });
+  this._el('async').addEventListener('change',function(){
+    self.autoSync=this.checked;
+    if(self.autoSync) self._scheduleSyncTable();
+  });
 
   /* ── Overview mouse ── */
   ov.addEventListener('mousemove',function(e){
     if(self.drag) return;
     var px=self._mPx(e), gf=self._px2f(px);
     var bx1=self._f2px(self.vS), bx2=self._f2px(self.vE);
-    if(Math.abs(px-bx1)<self.HPIX||Math.abs(px-bx2)<self.HPIX)
-      ov.className='tlw-ov-wrap tlw-cur-ew';
-    else if(gf>self.vS&&gf<self.vE)
-      ov.className='tlw-ov-wrap tlw-cur-grab';
-    else
-      ov.className='tlw-ov-wrap tlw-cur-pointer';
+    if(Math.abs(px-bx1)<self.HPIX||Math.abs(px-bx2)<self.HPIX) ov.className='tlw-ov-wrap tlw-cur-ew';
+    else if(gf>self.vS&&gf<self.vE)                            ov.className='tlw-ov-wrap tlw-cur-grab';
+    else                                                        ov.className='tlw-ov-wrap tlw-cur-pointer';
   });
-  ov.addEventListener('mouseleave',function(){
-    if(!self.drag) ov.className='tlw-ov-wrap tlw-cur-default';
-  });
+  ov.addEventListener('mouseleave',function(){ if(!self.drag) ov.className='tlw-ov-wrap tlw-cur-default'; });
 
   ov.addEventListener('mousedown',function(e){
     var px=self._mPx(e), gf=self._px2f(px);
-    var bx1=self._f2px(self.vS), bx2=self._f2px(self.vE);
-    var mode;
+    var bx1=self._f2px(self.vS), bx2=self._f2px(self.vE), mode;
     if(Math.abs(px-bx1)<self.HPIX)      mode='L';
     else if(Math.abs(px-bx2)<self.HPIX) mode='R';
     else if(gf>self.vS&&gf<self.vE)     mode='M';
@@ -864,35 +995,35 @@ TimelineWidget.prototype._bindDOM=function(){
     e.preventDefault();
   });
 
-  var onMove=function(e){
+  this._onDocMove=function(e){
     if(!self.drag) return;
     var px=self._mPx(e), gf=self._px2f(px);
-    var d=self.drag, w=d.snapE-d.snapS;
-    var MIN=self.MIN_BRUSH, EDGE=self.MIN_EDGE;
-    if(d.mode==='L')       self.vS=clamp(gf,EDGE,self.vE-MIN);
-    else if(d.mode==='R')  self.vE=clamp(gf,self.vS+MIN,1-EDGE);
-    else if(d.mode==='M'){ var delta=gf-d.anchor; self.vS=clamp(d.snapS+delta,EDGE,1-EDGE-w); self.vE=self.vS+w; }
-    else if(d.mode==='N'){ var lo=clamp(Math.min(d.anchor,gf),EDGE,1); var hi=clamp(Math.max(d.anchor,gf),0,1-EDGE); if(hi-lo<MIN)hi=lo+MIN; self.vS=lo;self.vE=hi; }
+    var d=self.drag, w=d.snapE-d.snapS, MIN=self.MIN_BRUSH;
+    if(d.mode==='L')       self.vS=clamp(gf,0,self.vE-MIN);
+    else if(d.mode==='R')  self.vE=clamp(gf,self.vS+MIN,1);
+    else if(d.mode==='M'){ var delta=gf-d.anchor; self.vS=clamp(d.snapS+delta,0,1-w); self.vE=self.vS+w; }
+    else if(d.mode==='N'){ var lo=clamp(Math.min(d.anchor,gf),0,1),hi=clamp(Math.max(d.anchor,gf),0,1); if(hi-lo<MIN)hi=lo+MIN; self.vS=lo;self.vE=hi; }
     var raw=px/self._ovW();
     if(raw<self.EDGE&&self.oS>0) self._startEdge(-1);
     else if(raw>(1-self.EDGE)&&self.oE<1) self._startEdge(1);
     else self._stopEdge();
+    // During drag: draw overview + labels synchronously (low cost), defer detail
     self._drawOv(); self._drawLabels();
     if(!self.lazyWave) self._drawDet();
   };
 
-  var onUp=function(e){
+  this._onDocUp=function(e){
     if(!self.drag) return;
     var wasMode=self.drag.mode, wasPx=self.drag.anchorPx;
     self.drag=null; self._stopEdge();
     ov.className='tlw-ov-wrap tlw-cur-default';
-    self._draw(); self._syncTableToView();
-    /* Click-to-navigate */
+    self._drawSync();
+    if(self.autoSync) self._scheduleSyncTable();
+
     if(wasMode==='N'&&self.rows.length){
       var curPx=self._mPx(e);
       if(Math.abs(curPx-wasPx)<5){
-        var gf2=self._px2f(curPx);
-        var ts2=self.gMin+gf2*self.gSpan;
+        var ts2=self.gMin+self._px2f(curPx)*self.gSpan;
         var hits=self.rows.filter(function(r){ return r.ts<=ts2&&r.te>=ts2; });
         if(!hits.length){
           var margin=self.gSpan*0.02;
@@ -904,17 +1035,16 @@ TimelineWidget.prototype._bindDOM=function(){
     }
   };
 
-  document.addEventListener('mousemove',onMove);
-  document.addEventListener('mouseup',  onUp);
+  document.addEventListener('mousemove',this._onDocMove);
+  document.addEventListener('mouseup',  this._onDocUp);
 
-  /* Overview scroll zoom — pivots on brush midpoint */
+  // Overview wheel — zoom pivoted on brush midpoint
   ov.addEventListener('wheel',function(e){
     e.preventDefault();
-    var factor=e.deltaY>0?1.25:0.8;
-    self._ovZoom(factor);
+    self._ovZoom(e.deltaY>0?1.25:0.8);
   },{passive:false});
 
-  /* Detail scroll pan */
+  // Detail wheel — pan
   this._el('dw').addEventListener('wheel',function(e){
     e.preventDefault();
     var w=self.vE-self.vS;
@@ -923,11 +1053,11 @@ TimelineWidget.prototype._bindDOM=function(){
     self.vS=clamp(self.vS+step,0,1-w); self.vE=self.vS+w;
     self._scrollOvToBrush();
     self._drawOv(); self._drawDet(); self._drawLabels();
-    clearTimeout(self._detScrollTimer);
-    self._detScrollTimer=setTimeout(function(){ self._syncTableToView(); },200);
+    clearTimeout(self._syncTimer);
+    if(self.autoSync) self._syncTimer=setTimeout(function(){ self._syncTableToView(); },250);
   },{passive:false});
 
-  /* Detail click — focus item AND centre overview on it */
+  // Detail click — focus, centre overview, sync table (scroll row to top)
   this._el('dw').addEventListener('click',function(e){
     if(!self.rows.length) return;
     var cv=self._el('detc'), rc=cv.getBoundingClientRect();
@@ -935,70 +1065,53 @@ TimelineWidget.prototype._bindDOM=function(){
     var ts=vs+((e.clientX-rc.left)/rc.width)*(ve-vs);
     var hits=self._detailRows().filter(function(r){ return r.ts<=ts&&r.te>=ts; });
     if(!hits.length) return;
-    var r=hits[0];
-    // Focus in detail and centre overview brush on it
-    self._focusRow(r);
-    // Centre the overview viewport on the focused item
-    var frac=self._gf((r.ts+r.te)/2);
-    var ow=self.oE-self.oS;
-    self.oS=clamp(frac-ow/2,0,1-ow);
-    self.oE=self.oS+ow;
-    self._draw();
+    self._focusRow(hits[0]);
   });
 
-  /* ── Keyboard ── */
+  // Keyboard
   this._kbZone='none';
-  ov.addEventListener('mouseenter',function(){ self._kbZone='ov'; });
-  ov.addEventListener('mouseleave',function(){ if(self._kbZone==='ov') self._kbZone='none'; });
+  ov.addEventListener('mouseenter',function(){ self._kbZone='ov';  });
+  ov.addEventListener('mouseleave',function(){ if(self._kbZone==='ov')  self._kbZone='none'; });
   this._el('dw').addEventListener('mouseenter',function(){ self._kbZone='det'; });
   this._el('dw').addEventListener('mouseleave',function(){ if(self._kbZone==='det') self._kbZone='none'; });
 
-  document.addEventListener('keydown',function(e){
+  this._onDocKey=function(e){
     if(self._kbZone==='none') return;
     var key=e.key;
-
-    /* Overview: ↑↓ zoom, ←→ pan brush */
     if(self._kbZone==='ov'){
       if(key==='ArrowUp'||key==='ArrowDown'){
-        e.preventDefault();
-        self._ovZoom(key==='ArrowUp'?0.7:1.4);
-        return;
+        e.preventDefault(); self._ovZoom(key==='ArrowUp'?0.7:1.4); return;
       }
       if(key==='ArrowLeft'||key==='ArrowRight'){
         e.preventDefault();
         var w=self.vE-self.vS, step=w*0.4*(key==='ArrowRight'?1:-1);
         self.vS=clamp(self.vS+step,0,1-w); self.vE=self.vS+w;
         self._scrollOvToBrush(); self._draw();
-        clearTimeout(self._detScrollTimer);
-        self._detScrollTimer=setTimeout(function(){ self._syncTableToView(); },200);
+        if(self.autoSync){ clearTimeout(self._syncTimer); self._syncTimer=setTimeout(function(){ self._syncTableToView(); },250); }
         return;
       }
     }
-
-    /* Detail: ←→ step items */
     if(self._kbZone==='det'&&(key==='ArrowLeft'||key==='ArrowRight')){
       e.preventDefault();
       var dir=key==='ArrowRight'?1:-1;
       if(!self.rows.length) return;
       var idx=-1;
-      for(var i=0;i<self.rows.length;i++){
-        if(self.rows[i].id===String(self.focusId)){ idx=i; break; }
-      }
+      for(var i=0;i<self.rows.length;i++){ if(self.rows[i].id===String(self.focusId)){idx=i;break;} }
       if(idx<0){
         var vs2=self.gMin+self.vS*self.gSpan, ve2=self.gMin+self.vE*self.gSpan;
-        for(var j=0;j<self.rows.length;j++){
-          if(self.rows[j].te>vs2&&self.rows[j].ts<ve2){ idx=j; break; }
-        }
+        for(var j=0;j<self.rows.length;j++){ if(self.rows[j].te>vs2&&self.rows[j].ts<ve2){idx=j;break;} }
         if(idx<0) return;
       }
       var next=clamp(idx+dir,0,self.rows.length-1);
       if(next!==idx) self._focusRow(self.rows[next]);
     }
-  });
+  };
+  document.addEventListener('keydown',this._onDocKey);
 
-  /* Resize */
+  // ResizeObserver
   if(window.ResizeObserver){
-    new ResizeObserver(function(){ self._draw(); }).observe(document.querySelector(self.ctnId));
+    this._resizeObs=new ResizeObserver(function(){ self._draw(); });
+    this._resizeObs.observe(document.querySelector(this.ctnId));
   }
 };
 
